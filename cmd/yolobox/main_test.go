@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -622,5 +623,48 @@ func TestPreprocessClaudeConfig(t *testing.T) {
 	}
 	if !strings.Contains(resultStr, "autoUpdates") {
 		t.Errorf("result should contain autoUpdates, got: %s", resultStr)
+	}
+}
+
+func TestFindSSHAgentSocketLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-only test")
+	}
+
+	// With SSH_AUTH_SOCK set, should return it directly
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/ssh-test/agent.123")
+	sock, err := findSSHAgentSocket()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sock != "/tmp/ssh-test/agent.123" {
+		t.Errorf("expected /tmp/ssh-test/agent.123, got %s", sock)
+	}
+
+	// Without SSH_AUTH_SOCK, should error
+	t.Setenv("SSH_AUTH_SOCK", "")
+	_, err = findSSHAgentSocket()
+	if err == nil {
+		t.Error("expected error when SSH_AUTH_SOCK is empty")
+	}
+}
+
+func TestFindSSHAgentSocketMacOSNoSSHAuthSock(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-only test")
+	}
+
+	// On macOS, SSH_AUTH_SOCK is not used directly — the function should
+	// detect the Docker runtime and return the VM-internal path or error.
+	// Without Docker running, it may error — that's the expected behavior.
+	t.Setenv("SSH_AUTH_SOCK", "")
+	sock, err := findSSHAgentSocket()
+	if err != nil {
+		// Expected when Docker/Colima isn't configured
+		return
+	}
+	// If it succeeds, the socket path should be non-empty
+	if sock == "" {
+		t.Error("expected non-empty socket path")
 	}
 }

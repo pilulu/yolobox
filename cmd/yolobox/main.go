@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -1127,6 +1128,56 @@ func findDockerSocket() (string, error) {
 	return "", fmt.Errorf("Docker socket not found. Is Docker running?")
 }
 
+// findSSHAgentSocket returns the SSH agent socket path to use as a volume mount source.
+// On Linux, SSH_AUTH_SOCK works directly. On macOS, the host's SSH_AUTH_SOCK path
+// doesn't exist inside the Docker VM, so we need the VM-internal path instead.
+func findSSHAgentSocket() (string, error) {
+	if runtime.GOOS != "darwin" {
+		// Linux: SSH_AUTH_SOCK works as-is
+		sock := os.Getenv("SSH_AUTH_SOCK")
+		if sock == "" {
+			return "", fmt.Errorf("SSH_AUTH_SOCK not set")
+		}
+		return sock, nil
+	}
+
+	// macOS: the host SSH_AUTH_SOCK path doesn't exist inside the Docker VM.
+	// We need to find the VM-internal socket path.
+	home, _ := os.UserHomeDir()
+
+	// Detect Docker Desktop vs Colima by checking socket paths
+	dockerDesktopSock := filepath.Join(home, ".docker", "run", "docker.sock")
+	if _, err := os.Stat(dockerDesktopSock); err == nil {
+		// Docker Desktop: well-known VM-internal path for SSH agent
+		return "/run/host-services/ssh-auth.sock", nil
+	}
+
+	colimaSock := filepath.Join(home, ".colima", "default", "docker.sock")
+	if _, err := os.Stat(colimaSock); err == nil {
+		// Colima: query the VM for its SSH_AUTH_SOCK
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "colima", "ssh", "--", "printenv", "SSH_AUTH_SOCK")
+		out, err := cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("SSH agent forwarding requires Colima's forwardAgent: true.\nEdit ~/.colima/default/colima.yaml, set forwardAgent: true, then: colima stop && colima start")
+		}
+		sock := strings.TrimSpace(string(out))
+		if sock == "" {
+			return "", fmt.Errorf("SSH agent forwarding requires Colima's forwardAgent: true.\nEdit ~/.colima/default/colima.yaml, set forwardAgent: true, then: colima stop && colima start")
+		}
+		return sock, nil
+	}
+
+	// Fallback: check if /var/run/docker.sock exists (symlinked or OrbStack)
+	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+		// Try Docker Desktop path as a reasonable default
+		return "/run/host-services/ssh-auth.sock", nil
+	}
+
+	return "", fmt.Errorf("could not determine SSH agent socket path for macOS Docker VM")
+}
+
 // ensureDockerNetwork creates the yolobox-net Docker network if it doesn't exist.
 func ensureDockerNetwork(runtimeName string, networkName string) error {
 	runtimePath, err := resolveRuntime(runtimeName)
@@ -1359,9 +1410,9 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 			// Apple container uses --ssh flag instead of socket mounts
 			args = append(args, "--ssh")
 		} else {
-			sock := os.Getenv("SSH_AUTH_SOCK")
-			if sock == "" {
-				warn("SSH_AUTH_SOCK not set; skipping ssh-agent mount")
+			sock, err := findSSHAgentSocket()
+			if err != nil {
+				warn("%s", err)
 			} else {
 				args = append(args, "-v", sock+":/ssh-agent")
 				args = append(args, "-e", "SSH_AUTH_SOCK=/ssh-agent")

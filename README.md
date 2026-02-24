@@ -103,6 +103,8 @@ yolobox help                # Show help
 | `--copy-agent-instructions` | Copy global agent instruction files (see below) |
 | `--docker` | Mount Docker socket and join shared network (see below) |
 
+> **SSH agent (macOS):** On macOS, `--ssh-agent` requires the Docker VM to forward the SSH agent. For **Colima**: edit `~/.colima/default/colima.yaml`, set `forwardAgent: true`, then restart (`colima stop && colima start`). **Docker Desktop** forwards the agent automatically.
+
 > **Networking:** By default, yolobox uses Docker's bridge network (internet access, no container DNS). Use `--network <name>` to join a docker compose network and access services by name. Use `--no-network` for complete isolation.
 
 > **Docker access:** The `--docker` flag mounts the host Docker socket into the container and joins a shared `yolobox-net` network. This lets the AI agent run Docker commands (build images, start containers, use docker compose) that create sibling containers on the same network. The agent and any services it creates can communicate by container name. The network name is available inside the container as `$YOLOBOX_NETWORK`. Cannot be used with `--no-network`.

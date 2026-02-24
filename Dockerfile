@@ -280,6 +280,11 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    sudo chmod 666 /var/run/docker.sock' \
     'fi' \
     '' \
+    '# Handle SSH agent socket permissions (when --ssh-agent is used)' \
+    'if [ -S /ssh-agent ]; then' \
+    '    sudo chmod 777 /ssh-agent' \
+    'fi' \
+    '' \
     '# Ensure npm-global prefix dir exists (named volume may shadow /home/yolo)' \
     'mkdir -p /home/yolo/.npm-global' \
     '' \
