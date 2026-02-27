@@ -42,6 +42,20 @@ smoke-test: build
 		echo "  ✗ go"; \
 		failed=1; \
 	fi; \
+	if ./$(BINARY) run --scratch claude --version >/dev/null 2>&1; then \
+		echo "  ✓ claude"; \
+	else \
+		echo "  ✗ claude"; \
+		failed=1; \
+	fi; \
+	IMG_VER=$$(./$(BINARY) run --scratch /usr/local/bin/claude --version 2>/dev/null | head -1); \
+	RUN_VER=$$(./$(BINARY) run claude --version 2>/dev/null | head -1); \
+	if [ "$$IMG_VER" = "$$RUN_VER" ]; then \
+		echo "  ✓ claude version pinned ($$RUN_VER)"; \
+	else \
+		echo "  ✗ claude version mismatch: image=$$IMG_VER, got=$$RUN_VER"; \
+		failed=1; \
+	fi; \
 	[ $$failed -eq 0 ]
 	@echo "Smoke tests passed!"
 
