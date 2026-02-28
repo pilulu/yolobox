@@ -145,7 +145,7 @@ func TestBuildRunArgs(t *testing.T) {
 		Mounts: []string{},
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, true)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestBuildRunArgsNoYolo(t *testing.T) {
 		NoYolo: true,
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestBuildRunArgsNoNetwork(t *testing.T) {
 		NoNetwork: true,
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestBuildRunArgsReadonlyProject(t *testing.T) {
 		ReadonlyProject: true,
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestBuildRunArgsNonInteractive(t *testing.T) {
 		Image: "test-image",
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"echo", "hello"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"echo", "hello"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestBuildRunArgsScratch(t *testing.T) {
 		Scratch: true,
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestBuildRunArgsScratchWithReadonlyProject(t *testing.T) {
 		ReadonlyProject: true,
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestBuildRunArgsNetwork(t *testing.T) {
 		Network: "dev_network",
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"echo"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"echo"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestBuildRunArgsPod(t *testing.T) {
 		NoNetwork: true,
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"echo"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"echo"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -655,7 +655,7 @@ func TestBuildRunArgsTimezone(t *testing.T) {
 		Image: "test-image",
 	}
 
-	args, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -689,6 +689,15 @@ func TestPreprocessClaudeConfig(t *testing.T) {
 		t.Fatal("preprocessClaudeConfig returned empty path")
 	}
 
+	// Verify the file uses a unique name (not the fixed "claude-config.json")
+	baseName := filepath.Base(resultPath)
+	if baseName == "claude-config.json" {
+		t.Error("expected unique temp file name, got fixed claude-config.json")
+	}
+	if !strings.HasPrefix(baseName, "claude-config-") || !strings.HasSuffix(baseName, ".json") {
+		t.Errorf("expected temp file matching claude-config-*.json, got %s", baseName)
+	}
+
 	// Read the result
 	result, err := os.ReadFile(resultPath)
 	if err != nil {
@@ -708,6 +717,43 @@ func TestPreprocessClaudeConfig(t *testing.T) {
 	}
 	if !strings.Contains(resultStr, "autoUpdates") {
 		t.Errorf("result should contain autoUpdates, got: %s", resultStr)
+	}
+}
+
+func TestConcurrentPreprocessClaudeConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	srcPath := filepath.Join(tmpDir, ".claude.json")
+
+	srcContent := `{"numStartups": 10, "installMethod": "native"}`
+	if err := os.WriteFile(srcPath, []byte(srcContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	// Call preprocessClaudeConfig concurrently and verify unique paths
+	const n = 10
+	paths := make([]string, n)
+	done := make(chan int, n)
+	for i := 0; i < n; i++ {
+		go func(idx int) {
+			paths[idx] = preprocessClaudeConfig(srcPath)
+			done <- idx
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		<-done
+	}
+
+	// All paths should be non-empty and unique
+	seen := make(map[string]bool)
+	for i, p := range paths {
+		if p == "" {
+			t.Fatalf("preprocessClaudeConfig[%d] returned empty path", i)
+		}
+		if seen[p] {
+			t.Errorf("duplicate temp path from concurrent calls: %s", p)
+		}
+		seen[p] = true
 	}
 }
 

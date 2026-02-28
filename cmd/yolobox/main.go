@@ -701,10 +701,16 @@ func runCommand(cfg Config, command []string, interactive bool) error {
 		}
 	}
 
-	args, err := buildRunArgs(cfg, projectDir, command, interactive)
+	args, cleanupPaths, err := buildRunArgs(cfg, projectDir, command, interactive)
 	if err != nil {
 		return err
 	}
+	// Clean up temp files after the container exits, regardless of outcome
+	defer func() {
+		for _, p := range cleanupPaths {
+			os.RemoveAll(p)
+		}
+	}()
 	return execRuntime(cfg.Runtime, args)
 }
 
@@ -1343,11 +1349,15 @@ func ensureDockerNetwork(runtimeName string, networkName string) error {
 	return nil
 }
 
-func buildRunArgs(cfg Config, projectDir string, command []string, interactive bool) ([]string, error) {
+func buildRunArgs(cfg Config, projectDir string, command []string, interactive bool) ([]string, []string, error) {
 	absProject, err := filepath.Abs(projectDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	// cleanupPaths collects temp files/dirs created during arg building
+	// that should be removed after the container exits
+	var cleanupPaths []string
 
 	// Check if we're using Apple container (doesn't support file mounts)
 	appleContainer := isAppleContainer(cfg.Runtime)
@@ -1428,7 +1438,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	if cfg.ClaudeConfig {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		claudeConfigDir := filepath.Join(home, ".claude")
 		if _, err := os.Stat(claudeConfigDir); err == nil {
@@ -1439,6 +1449,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 					warn("Failed to resolve symlinks in %s: %s", claudeConfigDir, err)
 				} else {
 					mountSrc = staged
+					cleanupPaths = append(cleanupPaths, staged)
 				}
 			}
 			args = append(args, "-v", mountSrc+":/host-claude/.claude:ro")
@@ -1447,6 +1458,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		if _, err := os.Stat(claudeConfigFile); err == nil {
 			// Preprocess to remove installMethod (host install method doesn't apply in container)
 			if processedPath := preprocessClaudeConfig(claudeConfigFile); processedPath != "" {
+				cleanupPaths = append(cleanupPaths, processedPath)
 				if appleContainer {
 					appleContainerFiles[processedPath] = "claude/.claude.json"
 				} else {
@@ -1455,16 +1467,26 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 			}
 		}
 		// On macOS, extract OAuth credentials from Keychain and mount as .credentials.json
-		// Write to ~/.yolobox/tmp/ which is definitely accessible to Docker
+		// Write to unique temp file in ~/.yolobox/tmp/ (unique per invocation to
+		// avoid conflicts when multiple yolobox instances run concurrently)
 		if creds := getClaudeCredentials(); creds != "" {
 			tmpDir := filepath.Join(home, ".yolobox", "tmp")
 			os.MkdirAll(tmpDir, 0700)
-			credsPath := filepath.Join(tmpDir, "claude-credentials.json")
-			if err := os.WriteFile(credsPath, []byte(creds), 0600); err == nil {
-				if appleContainer {
-					appleContainerFiles[credsPath] = "claude/.credentials.json"
+			f, err := os.CreateTemp(tmpDir, "claude-credentials-*.json")
+			if err == nil {
+				if _, writeErr := f.Write([]byte(creds)); writeErr == nil {
+					f.Close()
+					os.Chmod(f.Name(), 0600)
+					credsPath := f.Name()
+					cleanupPaths = append(cleanupPaths, credsPath)
+					if appleContainer {
+						appleContainerFiles[credsPath] = "claude/.credentials.json"
+					} else {
+						args = append(args, "-v", credsPath+":/host-claude/.credentials.json:ro")
+					}
 				} else {
-					args = append(args, "-v", credsPath+":/host-claude/.credentials.json:ro")
+					f.Close()
+					os.Remove(f.Name())
 				}
 			}
 		}
@@ -1474,7 +1496,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	if cfg.GeminiConfig {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		geminiConfigDir := filepath.Join(home, ".gemini")
 		if _, err := os.Stat(geminiConfigDir); err == nil {
@@ -1485,6 +1507,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 					warn("Failed to resolve symlinks in %s: %s", geminiConfigDir, err)
 				} else {
 					mountSrc = staged
+					cleanupPaths = append(cleanupPaths, staged)
 				}
 			}
 			args = append(args, "-v", mountSrc+":/host-gemini/.gemini:ro")
@@ -1495,7 +1518,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	if cfg.GitConfig {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		gitConfigFile := filepath.Join(home, ".gitconfig")
 		if _, err := os.Stat(gitConfigFile); err == nil {
@@ -1512,7 +1535,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	if cfg.CopyAgentInstructions {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Claude: ~/.claude/CLAUDE.md
 		claudeMd := filepath.Join(home, ".claude", "CLAUDE.md")
@@ -1551,6 +1574,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 					warn("Failed to resolve symlinks in %s: %s", copilotAgents, err)
 				} else {
 					mountSrc = staged
+					cleanupPaths = append(cleanupPaths, staged)
 				}
 			}
 			args = append(args, "-v", mountSrc+":/host-agent-instructions/copilot/agents:ro")
@@ -1561,8 +1585,9 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	if appleContainer && len(appleContainerFiles) > 0 {
 		tmpDir, err := prepareFileMountDir(appleContainerFiles)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		cleanupPaths = append(cleanupPaths, tmpDir)
 		// Mount the temp dir; entrypoint will need to handle the different paths
 		args = append(args, "-v", tmpDir+":/host-files:ro")
 		args = append(args, "-e", "YOLOBOX_HOST_FILES=/host-files")
@@ -1572,7 +1597,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	for _, mount := range cfg.Mounts {
 		resolved, err := resolveMount(mount, absProject)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		args = append(args, "-v", resolved)
 	}
@@ -1597,7 +1622,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	if cfg.Docker {
 		sock, err := findDockerSocket()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		args = append(args, "-v", sock+":/var/run/docker.sock")
 		// Default to yolobox-net if no explicit network is set
@@ -1620,7 +1645,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 
 	args = append(args, cfg.Image)
 	args = append(args, command...)
-	return args, nil
+	return args, cleanupPaths, nil
 }
 
 func resolveMount(mount string, projectDir string) (string, error) {
@@ -1758,20 +1783,26 @@ func preprocessClaudeConfig(srcPath string) string {
 		return ""
 	}
 
-	// Write to temp file in ~/.yolobox/tmp/
+	// Write to unique temp file in ~/.yolobox/tmp/ (unique per invocation to
+	// avoid conflicts when multiple yolobox instances run concurrently)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	tmpDir := filepath.Join(home, ".yolobox", "tmp")
 	os.MkdirAll(tmpDir, 0700)
-	tmpPath := filepath.Join(tmpDir, "claude-config.json")
+	f, err := os.CreateTemp(tmpDir, "claude-config-*.json")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
 
-	if err := os.WriteFile(tmpPath, processed, 0644); err != nil {
+	if _, err := f.Write(processed); err != nil {
+		os.Remove(f.Name())
 		return ""
 	}
 
-	return tmpPath
+	return f.Name()
 }
 
 // detectTimezone returns the host's IANA timezone (e.g., "America/New_York").
