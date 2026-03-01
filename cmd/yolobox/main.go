@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -68,6 +69,8 @@ var toolShortcuts = []string{
 	"copilot",
 }
 
+var sizePattern = regexp.MustCompile(`^\d+(?:\.\d+)?(?:[kKmMgGtTpP](?:i?[bB]?)?|[bB])?$`)
+
 type Config struct {
 	Runtime               string   `toml:"runtime"`
 	Image                 string   `toml:"image"`
@@ -88,30 +91,14 @@ type Config struct {
 	Docker                bool     `toml:"docker"`
 
 	// Resource limits
-	CPUs              string   `toml:"cpus"`
-	CPUShares         string   `toml:"cpu_shares"`
-	CPUQuota          string   `toml:"cpu_quota"`
-	CPUPeriod         string   `toml:"cpu_period"`
-	CPUSetCPUs        string   `toml:"cpuset_cpus"`
-	CPUSetMems        string   `toml:"cpuset_mems"`
-	Memory            string   `toml:"memory"`
-	MemoryReservation string   `toml:"memory_reservation"`
-	MemorySwap        string   `toml:"memory_swap"`
-	MemorySwappiness  string   `toml:"memory_swappiness"`
-	PidsLimit         string   `toml:"pids_limit"`
-	ShmSize           string   `toml:"shm_size"`
-	OOMScoreAdj       string   `toml:"oom_score_adj"`
-	OOMKillDisable    bool     `toml:"oom_kill_disable"`
-	Ulimits           []string `toml:"ulimits"`
-
-	// Device & security options
-	Devices           []string `toml:"devices"`
-	DeviceCgroupRules []string `toml:"device_cgroup_rules"`
-	CapAdd            []string `toml:"cap_add"`
-	CapDrop           []string `toml:"cap_drop"`
-	SecurityOpts      []string `toml:"security_opt"`
-	Sysctls           []string `toml:"sysctls"`
-	GPUs              string   `toml:"gpus"`
+	CPUs        string   `toml:"cpus"`
+	Memory      string   `toml:"memory"`
+	ShmSize     string   `toml:"shm_size"`
+	GPUs        string   `toml:"gpus"`
+	Devices     []string `toml:"devices"`
+	CapAdd      []string `toml:"cap_add"`
+	CapDrop     []string `toml:"cap_drop"`
+	RuntimeArgs []string `toml:"runtime_args"`
 
 	// Runtime-only fields (not persisted to config file)
 	Setup bool `toml:"-"` // Run interactive setup before starting
@@ -366,6 +353,14 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --gh-token            Forward GitHub CLI token (from gh auth token)")
 	fmt.Fprintln(os.Stderr, "  --copy-agent-instructions  Copy global agent instruction files")
 	fmt.Fprintln(os.Stderr, "  --docker              Mount Docker socket and join shared network")
+	fmt.Fprintln(os.Stderr, "  --cpus <count>        Limit number of CPUs (supports fractions)")
+	fmt.Fprintln(os.Stderr, "  --memory <size>       Cap memory usage (e.g., 4g, 512m)")
+	fmt.Fprintln(os.Stderr, "  --shm-size <size>     Size of /dev/shm (e.g., 1g for Playwright)")
+	fmt.Fprintln(os.Stderr, "  --gpus <spec>         GPU devices to add (e.g., all, device=0)")
+	fmt.Fprintln(os.Stderr, "  --device <spec>       Pass a host device through (repeatable)")
+	fmt.Fprintln(os.Stderr, "  --cap-add <name>      Add a Linux capability (repeatable)")
+	fmt.Fprintln(os.Stderr, "  --cap-drop <name>     Drop a Linux capability (repeatable)")
+	fmt.Fprintln(os.Stderr, "  --runtime-arg <flag>  Raw runtime flag passthrough (repeatable)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintf(os.Stderr, "%sCONFIG:%s\n", colorBold, colorReset)
 	fmt.Fprintln(os.Stderr, "  Global:  ~/.config/yolobox/config.toml")
@@ -417,31 +412,15 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 		mounts                stringSliceFlag
 		envVars               stringSliceFlag
 
-		// Resource limits
-		cpus              string
-		cpuShares         string
-		cpuQuota          string
-		cpuPeriod         string
-		cpuSetCPUs        string
-		cpuSetMems        string
-		memoryLimit       string
-		memoryReservation string
-		memorySwap        string
-		memorySwappiness  string
-		pidsLimit         string
-		shmSize           string
-		oomScoreAdj       string
-		oomKillDisable    bool
-		ulimits           stringSliceFlag
-
-		// Device & security
-		devices           stringSliceFlag
-		deviceCgroupRules stringSliceFlag
-		capAdd            stringSliceFlag
-		capDrop           stringSliceFlag
-		securityOpts      stringSliceFlag
-		sysctls           stringSliceFlag
-		gpus              string
+		// Resource limits & security
+		cpus        string
+		memoryLimit string
+		shmSize     string
+		gpus        string
+		devices     stringSliceFlag
+		capAdd      stringSliceFlag
+		capDrop     stringSliceFlag
+		runtimeArgs stringSliceFlag
 	)
 
 	fs.StringVar(&runtimeFlag, "runtime", "", "container runtime")
@@ -463,31 +442,15 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	fs.Var(&mounts, "mount", "extra mount src:dst")
 	fs.Var(&envVars, "env", "environment variable KEY=value")
 
-	// Resource limits
+	// Resource limits & security
 	fs.StringVar(&cpus, "cpus", "", "limit number of CPUs (supports fractions)")
-	fs.StringVar(&cpuShares, "cpu-shares", "", "set CPU shares (relative weight)")
-	fs.StringVar(&cpuQuota, "cpu-quota", "", "limit CPU CFS quota")
-	fs.StringVar(&cpuPeriod, "cpu-period", "", "set CPU CFS period")
-	fs.StringVar(&cpuSetCPUs, "cpuset-cpus", "", "CPUs where execution is allowed (e.g., 0-3)")
-	fs.StringVar(&cpuSetMems, "cpuset-mems", "", "memory nodes for execution (NUMA)")
 	fs.StringVar(&memoryLimit, "memory", "", "memory limit (e.g., 8g)")
-	fs.StringVar(&memoryReservation, "memory-reservation", "", "memory soft limit")
-	fs.StringVar(&memorySwap, "memory-swap", "", "swap limit (memory + swap)")
-	fs.StringVar(&memorySwappiness, "memory-swappiness", "", "tune container memory swappiness (0-100)")
-	fs.StringVar(&pidsLimit, "pids-limit", "", "maximum number of processes")
 	fs.StringVar(&shmSize, "shm-size", "", "size of /dev/shm (e.g., 1g)")
-	fs.StringVar(&oomScoreAdj, "oom-score-adj", "", "adjust OOM score (-1000 to 1000)")
-	fs.BoolVar(&oomKillDisable, "oom-kill-disable", false, "disable OOM killer")
-	fs.Var(&ulimits, "ulimit", "set ulimit (repeatable)")
-
-	// Device & security
+	fs.StringVar(&gpus, "gpus", "", "GPU devices to add (e.g., all or device IDs)")
 	fs.Var(&devices, "device", "add host device inside the container (repeatable)")
-	fs.Var(&deviceCgroupRules, "device-cgroup-rule", "add device cgroup rule (repeatable)")
 	fs.Var(&capAdd, "cap-add", "add Linux capability (repeatable)")
 	fs.Var(&capDrop, "cap-drop", "drop Linux capability (repeatable)")
-	fs.Var(&securityOpts, "security-opt", "security options (repeatable)")
-	fs.Var(&sysctls, "sysctl", "sysctl settings (repeatable)")
-	fs.StringVar(&gpus, "gpus", "", "GPU devices to add (e.g., all or device IDs)")
+	fs.Var(&runtimeArgs, "runtime-arg", "raw runtime flag to pass through to the container engine (repeatable)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -555,54 +518,18 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	if cpus != "" {
 		cfg.CPUs = cpus
 	}
-	if cpuShares != "" {
-		cfg.CPUShares = cpuShares
-	}
-	if cpuQuota != "" {
-		cfg.CPUQuota = cpuQuota
-	}
-	if cpuPeriod != "" {
-		cfg.CPUPeriod = cpuPeriod
-	}
-	if cpuSetCPUs != "" {
-		cfg.CPUSetCPUs = cpuSetCPUs
-	}
-	if cpuSetMems != "" {
-		cfg.CPUSetMems = cpuSetMems
-	}
 	if memoryLimit != "" {
 		cfg.Memory = memoryLimit
-	}
-	if memoryReservation != "" {
-		cfg.MemoryReservation = memoryReservation
-	}
-	if memorySwap != "" {
-		cfg.MemorySwap = memorySwap
-	}
-	if memorySwappiness != "" {
-		cfg.MemorySwappiness = memorySwappiness
-	}
-	if pidsLimit != "" {
-		cfg.PidsLimit = pidsLimit
 	}
 	if shmSize != "" {
 		cfg.ShmSize = shmSize
 	}
-	if oomScoreAdj != "" {
-		cfg.OOMScoreAdj = oomScoreAdj
-	}
-	if oomKillDisable {
-		cfg.OOMKillDisable = true
-	}
-	if len(ulimits) > 0 {
-		cfg.Ulimits = append(cfg.Ulimits, ulimits...)
+	if gpus != "" {
+		cfg.GPUs = gpus
 	}
 
 	if len(devices) > 0 {
 		cfg.Devices = append(cfg.Devices, devices...)
-	}
-	if len(deviceCgroupRules) > 0 {
-		cfg.DeviceCgroupRules = append(cfg.DeviceCgroupRules, deviceCgroupRules...)
 	}
 	if len(capAdd) > 0 {
 		cfg.CapAdd = append(cfg.CapAdd, capAdd...)
@@ -610,18 +537,15 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	if len(capDrop) > 0 {
 		cfg.CapDrop = append(cfg.CapDrop, capDrop...)
 	}
-	if len(securityOpts) > 0 {
-		cfg.SecurityOpts = append(cfg.SecurityOpts, securityOpts...)
-	}
-	if len(sysctls) > 0 {
-		cfg.Sysctls = append(cfg.Sysctls, sysctls...)
-	}
-	if gpus != "" {
-		cfg.GPUs = gpus
+	if len(runtimeArgs) > 0 {
+		cfg.RuntimeArgs = append(cfg.RuntimeArgs, runtimeArgs...)
 	}
 
 	// Validate conflicting options after config + CLI values have been merged.
 	if err := validateConfigConflicts(cfg); err != nil {
+		return cfg, nil, err
+	}
+	if err := validateRuntimeOptions(cfg); err != nil {
 		return cfg, nil, err
 	}
 
@@ -662,6 +586,64 @@ func validateRuntimeConstraints(cfg Config) error {
 		return fmt.Errorf("--pod requires the podman runtime (set --runtime podman)")
 	}
 	return nil
+}
+
+func validateRuntimeOptions(cfg Config) error {
+	if cfg.CPUs != "" {
+		cpuVal, err := strconv.ParseFloat(cfg.CPUs, 64)
+		if err != nil || cpuVal <= 0 {
+			return fmt.Errorf("invalid --cpus value %q: must be a positive number", cfg.CPUs)
+		}
+	}
+
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"memory", cfg.Memory},
+		{"shm-size", cfg.ShmSize},
+	} {
+		if field.value == "" {
+			continue
+		}
+		if !sizePattern.MatchString(field.value) {
+			return fmt.Errorf("invalid --%s value %q: expected a number optionally followed by k/m/g/t", field.name, field.value)
+		}
+	}
+
+	for _, arg := range cfg.RuntimeArgs {
+		if strings.TrimSpace(arg) == "" {
+			return fmt.Errorf("--runtime-arg entries cannot be blank")
+		}
+	}
+
+	return nil
+}
+
+func warnSecurityRelaxations(cfg Config) {
+	var categories []string
+	if len(cfg.CapAdd) > 0 {
+		categories = append(categories, "--cap-add")
+	}
+	if len(cfg.Devices) > 0 {
+		categories = append(categories, "--device")
+	}
+	if runtimeArgsContainUnconfined(cfg.RuntimeArgs) {
+		categories = append(categories, "--security-opt seccomp=unconfined")
+	}
+	if len(categories) == 0 {
+		return
+	}
+	warn("Security-impacting runtime flags active (%s). Ensure you trust the workload.", strings.Join(categories, ", "))
+}
+
+func runtimeArgsContainUnconfined(args []string) bool {
+	for _, arg := range args {
+		if strings.Contains(strings.ToLower(arg), "seccomp=unconfined") {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultConfig() Config {
@@ -773,53 +755,17 @@ func mergeConfig(dst *Config, src Config) {
 	if src.CPUs != "" {
 		dst.CPUs = src.CPUs
 	}
-	if src.CPUShares != "" {
-		dst.CPUShares = src.CPUShares
-	}
-	if src.CPUQuota != "" {
-		dst.CPUQuota = src.CPUQuota
-	}
-	if src.CPUPeriod != "" {
-		dst.CPUPeriod = src.CPUPeriod
-	}
-	if src.CPUSetCPUs != "" {
-		dst.CPUSetCPUs = src.CPUSetCPUs
-	}
-	if src.CPUSetMems != "" {
-		dst.CPUSetMems = src.CPUSetMems
-	}
 	if src.Memory != "" {
 		dst.Memory = src.Memory
-	}
-	if src.MemoryReservation != "" {
-		dst.MemoryReservation = src.MemoryReservation
-	}
-	if src.MemorySwap != "" {
-		dst.MemorySwap = src.MemorySwap
-	}
-	if src.MemorySwappiness != "" {
-		dst.MemorySwappiness = src.MemorySwappiness
-	}
-	if src.PidsLimit != "" {
-		dst.PidsLimit = src.PidsLimit
 	}
 	if src.ShmSize != "" {
 		dst.ShmSize = src.ShmSize
 	}
-	if src.OOMScoreAdj != "" {
-		dst.OOMScoreAdj = src.OOMScoreAdj
-	}
-	if src.OOMKillDisable {
-		dst.OOMKillDisable = true
-	}
-	if len(src.Ulimits) > 0 {
-		dst.Ulimits = append([]string{}, src.Ulimits...)
+	if src.GPUs != "" {
+		dst.GPUs = src.GPUs
 	}
 	if len(src.Devices) > 0 {
 		dst.Devices = append([]string{}, src.Devices...)
-	}
-	if len(src.DeviceCgroupRules) > 0 {
-		dst.DeviceCgroupRules = append([]string{}, src.DeviceCgroupRules...)
 	}
 	if len(src.CapAdd) > 0 {
 		dst.CapAdd = append([]string{}, src.CapAdd...)
@@ -827,14 +773,8 @@ func mergeConfig(dst *Config, src Config) {
 	if len(src.CapDrop) > 0 {
 		dst.CapDrop = append([]string{}, src.CapDrop...)
 	}
-	if len(src.SecurityOpts) > 0 {
-		dst.SecurityOpts = append([]string{}, src.SecurityOpts...)
-	}
-	if len(src.Sysctls) > 0 {
-		dst.Sysctls = append([]string{}, src.Sysctls...)
-	}
-	if src.GPUs != "" {
-		dst.GPUs = src.GPUs
+	if len(src.RuntimeArgs) > 0 {
+		dst.RuntimeArgs = append([]string{}, src.RuntimeArgs...)
 	}
 }
 
@@ -869,6 +809,30 @@ func runShell(cfg Config) error {
 			if !cfg.NoYolo {
 				cfg.NoYolo = newCfg.NoYolo
 			}
+			if cfg.CPUs == "" {
+				cfg.CPUs = newCfg.CPUs
+			}
+			if cfg.Memory == "" {
+				cfg.Memory = newCfg.Memory
+			}
+			if cfg.ShmSize == "" {
+				cfg.ShmSize = newCfg.ShmSize
+			}
+			if cfg.GPUs == "" {
+				cfg.GPUs = newCfg.GPUs
+			}
+			if len(cfg.Devices) == 0 {
+				cfg.Devices = append([]string{}, newCfg.Devices...)
+			}
+			if len(cfg.CapAdd) == 0 {
+				cfg.CapAdd = append([]string{}, newCfg.CapAdd...)
+			}
+			if len(cfg.CapDrop) == 0 {
+				cfg.CapDrop = append([]string{}, newCfg.CapDrop...)
+			}
+			if len(cfg.RuntimeArgs) == 0 {
+				cfg.RuntimeArgs = append([]string{}, newCfg.RuntimeArgs...)
+			}
 		}
 	}
 
@@ -899,6 +863,7 @@ func runCommand(cfg Config, command []string, interactive bool) error {
 	if err := validateRuntimeConstraints(cfg); err != nil {
 		return err
 	}
+	warnSecurityRelaxations(cfg)
 
 	// Warn if Docker has low memory (can cause OOM with Claude)
 	checkDockerMemory(cfg.Runtime)
@@ -950,27 +915,13 @@ func printConfig(cfg Config) error {
 	fmt.Printf("%sdocker:%s %t\n", colorBold, colorReset, cfg.Docker)
 
 	printStringConfigField("cpus", cfg.CPUs)
-	printStringConfigField("cpu_shares", cfg.CPUShares)
-	printStringConfigField("cpu_quota", cfg.CPUQuota)
-	printStringConfigField("cpu_period", cfg.CPUPeriod)
-	printStringConfigField("cpuset_cpus", cfg.CPUSetCPUs)
-	printStringConfigField("cpuset_mems", cfg.CPUSetMems)
 	printStringConfigField("memory", cfg.Memory)
-	printStringConfigField("memory_reservation", cfg.MemoryReservation)
-	printStringConfigField("memory_swap", cfg.MemorySwap)
-	printStringConfigField("memory_swappiness", cfg.MemorySwappiness)
-	printStringConfigField("pids_limit", cfg.PidsLimit)
 	printStringConfigField("shm_size", cfg.ShmSize)
-	printStringConfigField("oom_score_adj", cfg.OOMScoreAdj)
-	fmt.Printf("%soom_kill_disable:%s %t\n", colorBold, colorReset, cfg.OOMKillDisable)
-	printSliceConfigField("ulimits", cfg.Ulimits)
+	printStringConfigField("gpus", cfg.GPUs)
 	printSliceConfigField("devices", cfg.Devices)
-	printSliceConfigField("device_cgroup_rules", cfg.DeviceCgroupRules)
 	printSliceConfigField("cap_add", cfg.CapAdd)
 	printSliceConfigField("cap_drop", cfg.CapDrop)
-	printSliceConfigField("security_opt", cfg.SecurityOpts)
-	printSliceConfigField("sysctls", cfg.Sysctls)
-	printStringConfigField("gpus", cfg.GPUs)
+	printSliceConfigField("runtime_args", cfg.RuntimeArgs)
 
 	if len(cfg.Mounts) > 0 {
 		fmt.Printf("%smounts:%s\n", colorBold, colorReset)
@@ -1058,6 +1009,30 @@ func saveGlobalConfig(cfg Config) error {
 	if cfg.Pod != "" {
 		lines = append(lines, fmt.Sprintf("pod = %q", cfg.Pod))
 	}
+	if cfg.CPUs != "" {
+		lines = append(lines, fmt.Sprintf("cpus = %q", cfg.CPUs))
+	}
+	if cfg.Memory != "" {
+		lines = append(lines, fmt.Sprintf("memory = %q", cfg.Memory))
+	}
+	if cfg.ShmSize != "" {
+		lines = append(lines, fmt.Sprintf("shm_size = %q", cfg.ShmSize))
+	}
+	if cfg.GPUs != "" {
+		lines = append(lines, fmt.Sprintf("gpus = %q", cfg.GPUs))
+	}
+	if len(cfg.Devices) > 0 {
+		lines = append(lines, fmt.Sprintf("devices = %s", formatTomlStringSlice(cfg.Devices)))
+	}
+	if len(cfg.CapAdd) > 0 {
+		lines = append(lines, fmt.Sprintf("cap_add = %s", formatTomlStringSlice(cfg.CapAdd)))
+	}
+	if len(cfg.CapDrop) > 0 {
+		lines = append(lines, fmt.Sprintf("cap_drop = %s", formatTomlStringSlice(cfg.CapDrop)))
+	}
+	if len(cfg.RuntimeArgs) > 0 {
+		lines = append(lines, fmt.Sprintf("runtime_args = %s", formatTomlStringSlice(cfg.RuntimeArgs)))
+	}
 
 	content := strings.Join(lines, "\n")
 	if content != "" {
@@ -1069,6 +1044,38 @@ func saveGlobalConfig(cfg Config) error {
 	}
 
 	return nil
+}
+
+func formatTomlStringSlice(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		quoted = append(quoted, fmt.Sprintf("%q", v))
+	}
+	if len(quoted) == 0 {
+		return "[]"
+	}
+	return fmt.Sprintf("[%s]", strings.Join(quoted, ", "))
+}
+
+func parseMultilineInput(input string) []string {
+	if input == "" {
+		return nil
+	}
+	input = strings.ReplaceAll(input, "\r\n", "\n")
+	lines := strings.Split(input, "\n")
+	var values []string
+	for _, line := range lines {
+		val := strings.TrimSpace(line)
+		if val == "" {
+			continue
+		}
+		values = append(values, val)
+	}
+	return values
 }
 
 // yoloboxTheme returns a custom huh theme matching the yolobox brand
@@ -1113,6 +1120,14 @@ func runSetup() (Config, error) {
 	// Form fields
 	var selectedOptions []string
 	podName := cfg.Pod
+	cpuLimit := cfg.CPUs
+	memoryLimit := cfg.Memory
+	shmLimit := cfg.ShmSize
+	gpuSetting := cfg.GPUs
+	deviceList := strings.Join(cfg.Devices, "\n")
+	capAddList := strings.Join(cfg.CapAdd, "\n")
+	capDropList := strings.Join(cfg.CapDrop, "\n")
+	runtimeArgList := strings.Join(cfg.RuntimeArgs, "\n")
 
 	// Initialize from current config
 	if cfg.GitConfig {
@@ -1167,6 +1182,53 @@ func runSetup() (Config, error) {
 				Placeholder("e.g. mypod").
 				Value(&podName),
 		),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Default CPU limit (--cpus)").
+				Description("Optional, supports fractions like 1.5").
+				Placeholder("e.g. 2").
+				Value(&cpuLimit),
+			huh.NewInput().
+				Title("Default memory limit (--memory)").
+				Description("Optional, e.g., 4g or 512m").
+				Placeholder("e.g. 4g").
+				Value(&memoryLimit),
+			huh.NewInput().
+				Title("Default shm size (--shm-size)").
+				Description("Optional, e.g., 1g for Playwright").
+				Placeholder("e.g. 1g").
+				Value(&shmLimit),
+			huh.NewInput().
+				Title("Default GPUs (--gpus)").
+				Description("Optional, e.g., all or device=0").
+				Placeholder("e.g. all").
+				Value(&gpuSetting),
+		),
+		huh.NewGroup(
+			huh.NewText().
+				Title("Devices (--device)").
+				Description("One per line, e.g., /dev/kvm:/dev/kvm").
+				Lines(3).
+				Placeholder("/dev/kvm:/dev/kvm").
+				Value(&deviceList),
+			huh.NewText().
+				Title("Added capabilities (--cap-add)").
+				Description("One per line, e.g., SYS_PTRACE").
+				Lines(3).
+				Placeholder("SYS_PTRACE").
+				Value(&capAddList),
+			huh.NewText().
+				Title("Dropped capabilities (--cap-drop)").
+				Description("One per line").
+				Lines(3).
+				Value(&capDropList),
+			huh.NewText().
+				Title("Raw runtime args (--runtime-arg)").
+				Description("One per line, passed directly to Docker/Podman").
+				Lines(4).
+				Placeholder("--security-opt seccomp=unconfined").
+				Value(&runtimeArgList),
+		),
 	).WithTheme(yoloboxTheme())
 
 	err := form.Run()
@@ -1185,8 +1247,19 @@ func runSetup() (Config, error) {
 	cfg.NoNetwork = contains(selectedOptions, "no_network")
 	cfg.NoYolo = contains(selectedOptions, "no_yolo")
 	cfg.Pod = strings.TrimSpace(podName)
+	cfg.CPUs = strings.TrimSpace(cpuLimit)
+	cfg.Memory = strings.TrimSpace(memoryLimit)
+	cfg.ShmSize = strings.TrimSpace(shmLimit)
+	cfg.GPUs = strings.TrimSpace(gpuSetting)
+	cfg.Devices = parseMultilineInput(deviceList)
+	cfg.CapAdd = parseMultilineInput(capAddList)
+	cfg.CapDrop = parseMultilineInput(capDropList)
+	cfg.RuntimeArgs = parseMultilineInput(runtimeArgList)
 
 	if err := validateConfigConflicts(cfg); err != nil {
+		return cfg, err
+	}
+	if err := validateRuntimeOptions(cfg); err != nil {
 		return cfg, err
 	}
 
@@ -1228,22 +1301,15 @@ func splitToolArgs(args []string) (yoloboxArgs, toolArgs []string) {
 		"gemini-config": true, "git-config": true, "gh-token": true,
 		"copy-agent-instructions": true, "docker": true, "setup": true, "mount": true,
 		"env": true, "h": true, "help": true,
-		"cpus": true, "cpu-shares": true, "cpu-quota": true, "cpu-period": true,
-		"cpuset-cpus": true, "cpuset-mems": true, "memory": true, "memory-reservation": true,
-		"memory-swap": true, "memory-swappiness": true, "pids-limit": true, "shm-size": true,
-		"oom-score-adj": true, "oom-kill-disable": true, "ulimit": true, "device": true,
-		"device-cgroup-rule": true, "cap-add": true, "cap-drop": true, "security-opt": true,
-		"sysctl": true, "gpus": true,
+		"cpus": true, "memory": true, "shm-size": true, "gpus": true,
+		"device": true, "cap-add": true, "cap-drop": true, "runtime-arg": true,
 	}
 
 	flagsWithValues := map[string]bool{
 		"runtime": true, "image": true, "network": true, "pod": true,
-		"mount": true, "env": true, "cpus": true, "cpu-shares": true, "cpu-quota": true,
-		"cpu-period": true, "cpuset-cpus": true, "cpuset-mems": true, "memory": true,
-		"memory-reservation": true, "memory-swap": true, "memory-swappiness": true,
-		"pids-limit": true, "shm-size": true, "oom-score-adj": true, "ulimit": true,
-		"device": true, "device-cgroup-rule": true, "cap-add": true, "cap-drop": true,
-		"security-opt": true, "sysctl": true, "gpus": true,
+		"mount": true, "env": true, "cpus": true, "memory": true,
+		"shm-size": true, "device": true, "cap-add": true, "cap-drop": true,
+		"gpus": true, "runtime-arg": true,
 	}
 
 	i := 0
@@ -1879,33 +1945,13 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		args = append(args, "-v", resolved)
 	}
 
-	// Resource limits
+	// Resource & security controls
 	args = appendRunFlag(args, "cpus", cfg.CPUs)
-	args = appendRunFlag(args, "cpu-shares", cfg.CPUShares)
-	args = appendRunFlag(args, "cpu-quota", cfg.CPUQuota)
-	args = appendRunFlag(args, "cpu-period", cfg.CPUPeriod)
-	args = appendRunFlag(args, "cpuset-cpus", cfg.CPUSetCPUs)
-	args = appendRunFlag(args, "cpuset-mems", cfg.CPUSetMems)
 	args = appendRunFlag(args, "memory", cfg.Memory)
-	args = appendRunFlag(args, "memory-reservation", cfg.MemoryReservation)
-	args = appendRunFlag(args, "memory-swap", cfg.MemorySwap)
-	args = appendRunFlag(args, "memory-swappiness", cfg.MemorySwappiness)
-	args = appendRunFlag(args, "pids-limit", cfg.PidsLimit)
 	args = appendRunFlag(args, "shm-size", cfg.ShmSize)
-	args = appendRunFlag(args, "oom-score-adj", cfg.OOMScoreAdj)
-	if cfg.OOMKillDisable {
-		args = append(args, "--oom-kill-disable")
-	}
-	for _, u := range cfg.Ulimits {
-		args = append(args, "--ulimit", u)
-	}
-
-	// Device & security controls
+	args = appendRunFlag(args, "gpus", cfg.GPUs)
 	for _, d := range cfg.Devices {
 		args = append(args, "--device", d)
-	}
-	for _, r := range cfg.DeviceCgroupRules {
-		args = append(args, "--device-cgroup-rule", r)
 	}
 	for _, c := range cfg.CapAdd {
 		args = append(args, "--cap-add", c)
@@ -1913,13 +1959,6 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	for _, c := range cfg.CapDrop {
 		args = append(args, "--cap-drop", c)
 	}
-	for _, o := range cfg.SecurityOpts {
-		args = append(args, "--security-opt", o)
-	}
-	for _, s := range cfg.Sysctls {
-		args = append(args, "--sysctl", s)
-	}
-	args = appendRunFlag(args, "gpus", cfg.GPUs)
 
 	// SSH agent forwarding
 	if cfg.SSHAgent {
@@ -1960,6 +1999,10 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		} else if cfg.Network != "" {
 			args = append(args, "--network", cfg.Network)
 		}
+	}
+
+	if len(cfg.RuntimeArgs) > 0 {
+		args = append(args, cfg.RuntimeArgs...)
 	}
 
 	args = append(args, cfg.Image)

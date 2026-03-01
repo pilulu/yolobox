@@ -206,6 +206,77 @@ func TestBuildRunArgsNoYolo(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgsRuntimeArgs(t *testing.T) {
+	cfg := Config{
+		Image:       "test-image",
+		RuntimeArgs: []string{"--security-opt", "seccomp=unconfined"},
+	}
+
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	imageIdx := -1
+	for i, arg := range args {
+		if arg == "test-image" {
+			imageIdx = i
+			break
+		}
+	}
+	if imageIdx == -1 {
+		t.Fatalf("test-image not found in args: %v", args)
+	}
+	if imageIdx < 2 {
+		t.Fatalf("runtime args missing before image: %v", args)
+	}
+	if args[imageIdx-2] != "--security-opt" || args[imageIdx-1] != "seccomp=unconfined" {
+		t.Fatalf("runtime args not placed before image: %v", args)
+	}
+}
+
+func TestValidateRuntimeOptions(t *testing.T) {
+	cfg := Config{
+		CPUs:    "2.5",
+		Memory:  "4g",
+		ShmSize: "1GiB",
+	}
+
+	if err := validateRuntimeOptions(cfg); err != nil {
+		t.Fatalf("expected valid config, got %v", err)
+	}
+}
+
+func TestValidateRuntimeOptionsInvalid(t *testing.T) {
+	tests := []Config{
+		{CPUs: "zero"},
+		{CPUs: "-1"},
+		{Memory: "a lot"},
+		{ShmSize: "123x"},
+		{RuntimeArgs: []string{"", " "}},
+	}
+
+	for _, cfg := range tests {
+		if err := validateRuntimeOptions(cfg); err == nil {
+			t.Fatalf("expected error for cfg %#v", cfg)
+		}
+	}
+}
+
+func TestParseMultilineInput(t *testing.T) {
+	input := "alpha\n beta\r\n\ngamma"
+	values := parseMultilineInput(input)
+	expected := []string{"alpha", "beta", "gamma"}
+	if len(values) != len(expected) {
+		t.Fatalf("expected %d values, got %d (%v)", len(expected), len(values), values)
+	}
+	for i, val := range expected {
+		if values[i] != val {
+			t.Fatalf("expected %q at index %d, got %q", val, i, values[i])
+		}
+	}
+}
+
 func TestBuildRunArgsNoNetwork(t *testing.T) {
 	cfg := Config{
 		Image:     "test-image",
@@ -431,15 +502,11 @@ func TestBuildRunArgsPod(t *testing.T) {
 
 func TestBuildRunArgsResourceLimits(t *testing.T) {
 	cfg := Config{
-		Image:             "test-image",
-		CPUs:              "4",
-		CPUShares:         "512",
-		Memory:            "8g",
-		MemoryReservation: "4g",
-		MemorySwap:        "10g",
-		ShmSize:           "2g",
-		PidsLimit:         "128",
-		Ulimits:           []string{"nofile=2048:4096"},
+		Image:   "test-image",
+		CPUs:    "4",
+		Memory:  "8g",
+		ShmSize: "2g",
+		GPUs:    "all",
 	}
 
 	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
@@ -450,13 +517,9 @@ func TestBuildRunArgsResourceLimits(t *testing.T) {
 	argsStr := strings.Join(args, " ")
 	for _, expect := range []string{
 		"--cpus 4",
-		"--cpu-shares 512",
 		"--memory 8g",
-		"--memory-reservation 4g",
-		"--memory-swap 10g",
 		"--shm-size 2g",
-		"--pids-limit 128",
-		"--ulimit nofile=2048:4096",
+		"--gpus all",
 	} {
 		if !strings.Contains(argsStr, expect) {
 			t.Fatalf("expected run args to contain %s, got %s", expect, argsStr)
@@ -466,14 +529,11 @@ func TestBuildRunArgsResourceLimits(t *testing.T) {
 
 func TestBuildRunArgsDeviceSecurity(t *testing.T) {
 	cfg := Config{
-		Image:             "test-image",
-		Devices:           []string{"/dev/kvm:/dev/kvm"},
-		DeviceCgroupRules: []string{"c 7:0 rmw"},
-		CapAdd:            []string{"SYS_PTRACE"},
-		CapDrop:           []string{"MKNOD"},
-		SecurityOpts:      []string{"seccomp=unconfined"},
-		Sysctls:           []string{"net.ipv4.ip_unprivileged_port_start=0"},
-		GPUs:              "all",
+		Image:   "test-image",
+		Devices: []string{"/dev/kvm:/dev/kvm"},
+		CapAdd:  []string{"SYS_PTRACE"},
+		CapDrop: []string{"MKNOD"},
+		GPUs:    "all",
 	}
 
 	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
@@ -484,11 +544,8 @@ func TestBuildRunArgsDeviceSecurity(t *testing.T) {
 	argsStr := strings.Join(args, " ")
 	for _, expect := range []string{
 		"--device /dev/kvm:/dev/kvm",
-		"--device-cgroup-rule c 7:0 rmw",
 		"--cap-add SYS_PTRACE",
 		"--cap-drop MKNOD",
-		"--security-opt seccomp=unconfined",
-		"--sysctl net.ipv4.ip_unprivileged_port_start=0",
 		"--gpus all",
 	} {
 		if !strings.Contains(argsStr, expect) {
@@ -561,20 +618,10 @@ func TestParseFlagsResourceLimits(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	args := []string{
 		"--cpus", "4",
-		"--cpu-shares", "512",
-		"--cpu-quota", "100000",
-		"--cpu-period", "200000",
-		"--cpuset-cpus", "0-3",
-		"--cpuset-mems", "0",
 		"--memory", "8g",
-		"--memory-reservation", "4g",
-		"--memory-swap", "10g",
-		"--memory-swappiness", "60",
-		"--pids-limit", "256",
 		"--shm-size", "1g",
-		"--oom-score-adj", "-500",
-		"--oom-kill-disable",
-		"--ulimit", "nofile=1024:2048",
+		"--gpus", "all",
+		"--runtime-arg", "--cpu-shares=512",
 		"echo",
 	}
 
@@ -583,23 +630,17 @@ func TestParseFlagsResourceLimits(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.CPUs != "4" || cfg.CPUShares != "512" || cfg.CPUQuota != "100000" || cfg.CPUPeriod != "200000" {
-		t.Errorf("unexpected CPU limits: %+v", cfg)
+	if cfg.CPUs != "4" {
+		t.Errorf("unexpected CPU limit: %+v", cfg.CPUs)
 	}
-	if cfg.CPUSetCPUs != "0-3" || cfg.CPUSetMems != "0" {
-		t.Errorf("unexpected cpuset values: %+v", cfg)
-	}
-	if cfg.Memory != "8g" || cfg.MemoryReservation != "4g" || cfg.MemorySwap != "10g" || cfg.MemorySwappiness != "60" {
+	if cfg.Memory != "8g" || cfg.ShmSize != "1g" {
 		t.Errorf("unexpected memory limits: %+v", cfg)
 	}
-	if cfg.PidsLimit != "256" || cfg.ShmSize != "1g" {
-		t.Errorf("unexpected pids/shm limits: %+v", cfg)
+	if cfg.GPUs != "all" {
+		t.Errorf("expected GPUs=all, got %s", cfg.GPUs)
 	}
-	if cfg.OOMScoreAdj != "-500" || !cfg.OOMKillDisable {
-		t.Errorf("expected OOM adjustments to be set: %+v", cfg)
-	}
-	if len(cfg.Ulimits) != 1 || cfg.Ulimits[0] != "nofile=1024:2048" {
-		t.Fatalf("expected ulimit to be parsed, got %+v", cfg.Ulimits)
+	if len(cfg.RuntimeArgs) != 1 || cfg.RuntimeArgs[0] != "--cpu-shares=512" {
+		t.Fatalf("expected runtime args to be captured, got %+v", cfg.RuntimeArgs)
 	}
 	if len(rest) != 1 || rest[0] != "echo" {
 		t.Errorf("expected remaining args [echo], got %v", rest)
@@ -610,11 +651,10 @@ func TestParseFlagsDeviceSecurity(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	args := []string{
 		"--device", "/dev/kvm:/dev/kvm",
-		"--device-cgroup-rule", "c 7:0 rmw",
 		"--cap-add", "SYS_PTRACE",
 		"--cap-drop", "MKNOD",
-		"--security-opt", "seccomp=unconfined",
-		"--sysctl", "net.ipv4.ip_unprivileged_port_start=0",
+		"--runtime-arg", "--security-opt",
+		"--runtime-arg", "seccomp=unconfined",
 		"--gpus", "all",
 		"echo",
 	}
@@ -625,11 +665,9 @@ func TestParseFlagsDeviceSecurity(t *testing.T) {
 	}
 
 	expectSliceEqual(t, cfg.Devices, []string{"/dev/kvm:/dev/kvm"})
-	expectSliceEqual(t, cfg.DeviceCgroupRules, []string{"c 7:0 rmw"})
 	expectSliceEqual(t, cfg.CapAdd, []string{"SYS_PTRACE"})
 	expectSliceEqual(t, cfg.CapDrop, []string{"MKNOD"})
-	expectSliceEqual(t, cfg.SecurityOpts, []string{"seccomp=unconfined"})
-	expectSliceEqual(t, cfg.Sysctls, []string{"net.ipv4.ip_unprivileged_port_start=0"})
+	expectSliceEqual(t, cfg.RuntimeArgs, []string{"--security-opt", "seccomp=unconfined"})
 	if cfg.GPUs != "all" {
 		t.Errorf("expected GPUs=all, got %s", cfg.GPUs)
 	}
