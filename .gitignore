@@ -30,3 +30,8 @@ Thumbs.db
 
 # Local config (user-specific)
 .yolobox.local.toml
+
+# Docs
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
