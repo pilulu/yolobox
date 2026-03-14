@@ -2627,11 +2627,6 @@ func upgradeYolobox() error {
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
 
-	// Clean up dangling images to reclaim disk space (old yolobox images
-	// become dangling after pull replaces the :latest tag)
-	info("Cleaning up old images...")
-	_ = execCommand(runtime, []string{"image", "prune", "-f"})
-
 	success("Upgrade complete!")
 	return nil
 }
