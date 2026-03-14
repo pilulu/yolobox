@@ -1,52 +1,6 @@
 <template>
   <div class="home-content">
 
-    <!-- ── Quick Start ── -->
-    <section class="home-section quickstart-section">
-      <div class="section-inner">
-        <div class="section-label">Quick Start</div>
-        <h2 class="section-title">Two commands. That's it.</h2>
-        <div class="quickstart-terminal">
-          <div class="term">
-            <div class="term-header">
-              <span class="dot dot-red"></span>
-              <span class="dot dot-yellow"></span>
-              <span class="dot dot-green"></span>
-              <span class="term-title">zsh</span>
-            </div>
-            <div class="term-body">
-              <div class="term-line"><span class="comment"># Install</span></div>
-              <div class="term-line"><span class="prompt">$</span> brew install finbarr/tap/yolobox</div>
-              <div class="term-line">&nbsp;</div>
-              <div class="term-line"><span class="comment"># Run from any project</span></div>
-              <div class="term-line"><span class="prompt">$</span> cd /path/to/your/project</div>
-              <div class="term-line"><span class="prompt">$</span> yolobox claude  <span class="comment"># or codex, gemini, copilot</span></div>
-            </div>
-          </div>
-        </div>
-        <div class="install-alt">
-          Or use the install script: <code>curl -fsSL https://raw.githubusercontent.com/finbarr/yolobox/master/install.sh | bash</code>
-        </div>
-        <div class="quickstart-cta">
-          <a href="/getting-started" class="cta-docs">Read the docs</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="home-section guide-section">
-      <div class="section-inner">
-        <div class="section-label">Find the Right Page</div>
-        <h2 class="section-title">Start with the task you are trying to solve</h2>
-        <div class="guide-grid">
-          <a v-for="guide in guides" :key="guide.title" :href="guide.href" class="guide-card">
-            <div class="guide-kicker">{{ guide.kicker }}</div>
-            <h3>{{ guide.title }}</h3>
-            <p>{{ guide.copy }}</p>
-          </a>
-        </div>
-      </div>
-    </section>
-
     <!-- ── Problem / Solution ── -->
     <section class="home-section comparison-section">
       <div class="section-inner">
@@ -110,12 +64,17 @@
     <!-- ── How It Works ── -->
     <section class="home-section steps-section">
       <div class="section-inner">
-        <div class="section-label">How It Works</div>
-        <h2 class="section-title">Container isolation, zero config</h2>
+        <div class="section-label">The Solution</div>
+        <h2 class="section-title">Let your AI go full send. Your home directory stays home.</h2>
         <p class="section-desc">
-          yolobox wraps Docker or Podman to create a sandboxed environment tailored for AI agents.
-          No Dockerfiles, no compose files, no setup.
+          yolobox gives the agent full permissions inside a container while keeping the important host boundaries intact.
         </p>
+        <div class="solution-grid">
+          <div class="solution-item">Project mounted at its real path</div>
+          <div class="solution-item">Full permissions and sudo inside the box</div>
+          <div class="solution-item">Home directory not mounted by default</div>
+          <div class="solution-item">Persistent volumes keep tools and state across runs</div>
+        </div>
         <div class="steps-grid">
           <div class="step-card">
             <div class="step-number">01</div>
@@ -142,6 +101,52 @@
               agent installs anything it needs. Sessions survive restarts.
             </p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Quick Start ── -->
+    <section class="home-section quickstart-section">
+      <div class="section-inner">
+        <div class="section-label">Quick Start</div>
+        <h2 class="section-title">Two commands. That's it.</h2>
+        <div class="quickstart-terminal">
+          <div class="term">
+            <div class="term-header">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+              <span class="term-title">zsh</span>
+            </div>
+            <div class="term-body">
+              <div class="term-line"><span class="comment"># Install</span></div>
+              <div class="term-line"><span class="prompt">$</span> brew install finbarr/tap/yolobox</div>
+              <div class="term-line">&nbsp;</div>
+              <div class="term-line"><span class="comment"># Run from any project</span></div>
+              <div class="term-line"><span class="prompt">$</span> cd /path/to/your/project</div>
+              <div class="term-line"><span class="prompt">$</span> yolobox claude  <span class="comment"># or codex, gemini, copilot</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="install-alt">
+          Or use the install script: <code>curl -fsSL https://raw.githubusercontent.com/finbarr/yolobox/master/install.sh | bash</code>
+        </div>
+        <div class="quickstart-cta">
+          <a href="/getting-started" class="cta-docs">Read the docs</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-section guide-section">
+      <div class="section-inner">
+        <div class="section-label">Find the Right Page</div>
+        <h2 class="section-title">Start with the task you are trying to solve</h2>
+        <div class="guide-grid">
+          <a v-for="guide in guides" :key="guide.title" :href="guide.href" class="guide-card">
+            <div class="guide-kicker">{{ guide.kicker }}</div>
+            <h3>{{ guide.title }}</h3>
+            <p>{{ guide.copy }}</p>
+          </a>
         </div>
       </div>
     </section>
@@ -382,9 +387,7 @@ const guides = [
 
 /* ── Quick Start ── */
 .quickstart-section {
-  padding-top: 48px;
   padding-bottom: 80px;
-  border-top: none !important;
 }
 
 .quickstart-terminal {
@@ -507,6 +510,24 @@ const guides = [
   border-radius: 4px;
 }
 
+.solution-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 28px;
+  margin-bottom: 40px;
+}
+
+.solution-item {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(255, 107, 0, 0.05);
+  border: 1px solid rgba(255, 140, 0, 0.14);
+  color: var(--vp-c-text-1);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
 /* ── Agents ── */
 .agents-grid {
   display: grid;
@@ -572,6 +593,7 @@ const guides = [
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .guide-grid,
+  .solution-grid,
   .terminals-grid {
     grid-template-columns: 1fr;
   }

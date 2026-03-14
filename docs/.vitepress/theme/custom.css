@@ -161,6 +161,30 @@ html {
   color: var(--vp-c-text-2);
 }
 
+/* ---------- Landing Page ---------- */
+
+.landing-page .VPDoc {
+  padding: 0 !important;
+}
+
+.landing-page .container,
+.landing-page .content,
+.landing-page .content-container {
+  max-width: none !important;
+}
+
+.landing-page .content-container {
+  padding: 0 !important;
+}
+
+.landing-page .vp-doc {
+  padding: 0 !important;
+}
+
+.landing-page .vp-doc > div:first-child {
+  margin-top: 0 !important;
+}
+
 /* ---------- Hero Section ---------- */
 
 /* ASCII art replaces the name on desktop; name shows on mobile as fallback */

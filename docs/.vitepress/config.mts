@@ -4,6 +4,12 @@ export default defineConfig({
   title: 'yolobox',
   description: 'Run AI coding agents in a sandboxed container. Your home directory stays home.',
 
+  vite: {
+    server: {
+      allowedHosts: ['localhost', 'host.docker.internal', 'yolobox-docs-dev'],
+    },
+  },
+
   head: [
     ['link', { rel: 'icon', href: '/favicon.svg' }],
     ['meta', { property: 'og:title', content: 'yolobox' }],
