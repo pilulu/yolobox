@@ -247,8 +247,8 @@ const guides = [
 }
 
 .masthead-section {
-  padding-top: 56px;
-  padding-bottom: 8px;
+  padding-top: 32px;
+  padding-bottom: 10px;
 }
 
 .masthead-section + .home-section {
@@ -258,6 +258,10 @@ const guides = [
 .masthead-inner {
   display: flex;
   justify-content: flex-start;
+}
+
+.comparison-section {
+  padding-top: 0;
 }
 
 .section-inner {

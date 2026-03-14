@@ -29,7 +29,6 @@ export default defineConfig({
       { text: 'Customize', link: '/customizing' },
       { text: 'Reference', link: '/flags' },
       { text: 'Security', link: '/security' },
-      { text: 'GitHub', link: 'https://github.com/finbarr/yolobox' },
     ],
 
     sidebar: [
