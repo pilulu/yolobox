@@ -261,6 +261,10 @@ const guides = [
   padding-top: 0;
 }
 
+.steps-section .section-desc {
+  max-width: none;
+}
+
 .section-inner {
   max-width: 960px;
   margin: 0 auto;
