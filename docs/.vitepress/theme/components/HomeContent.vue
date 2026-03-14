@@ -32,7 +32,8 @@
                 <div class="term-line"><span class="danger-text">No such file or directory</span></div>
                 <div class="term-line"><span class="prompt">$</span> ls ~/Documents</div>
                 <div class="term-line"><span class="danger-text">No such file or directory</span></div>
-                <div class="term-line"><span class="comment"># everything is gone.</span></div>
+                <div class="term-line"><span class="prompt">You&gt;</span> Wtf Claude you deleted everything!</div>
+                <div class="term-line"><span class="danger-text">Claude&gt;</span> You're absolutely right!</div>
               </div>
             </div>
           </div>
@@ -54,6 +55,7 @@
                 <div class="term-line"><span class="comment"># back on the host:</span></div>
                 <div class="term-line"><span class="prompt">$</span> ls ~/.ssh</div>
                 <div class="term-line"><span class="safe-text">id_ed25519  config</span>  <span class="comment"># safe</span></div>
+                <div class="term-line"><span class="prompt">You&gt;</span> 😎</div>
               </div>
             </div>
           </div>
