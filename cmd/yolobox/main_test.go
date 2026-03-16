@@ -28,8 +28,12 @@ func TestMergeConfig(t *testing.T) {
 	src := Config{
 		Image:     "new-image",
 		SSHAgent:  true,
-		NoNetwork: true,
-		Scratch:   true,
+		NoNetwork:    true,
+		Scratch:      true,
+		ClaudeConfig: true,
+		GeminiConfig: true,
+		VibeConfig:   true,
+		GitConfig:    true,
 	}
 
 	mergeConfig(&dst, src)
@@ -48,6 +52,18 @@ func TestMergeConfig(t *testing.T) {
 	}
 	if !dst.Scratch {
 		t.Error("expected Scratch to be true")
+	}
+	if !dst.ClaudeConfig {
+		t.Error("expected ClaudeConfig to be true")
+	}
+	if !dst.GeminiConfig {
+		t.Error("expected GeminiConfig to be true")
+	}
+	if !dst.VibeConfig {
+		t.Error("expected VibeConfig to be true")
+	}
+	if !dst.GitConfig {
+		t.Error("expected GitConfig to be true")
 	}
 }
 
@@ -691,6 +707,8 @@ func TestToolShortcuts(t *testing.T) {
 		"claude",
 		"codex",
 		"gemini",
+		"vibe",
+		"devstral",
 		"opencode",
 		"copilot",
 	}

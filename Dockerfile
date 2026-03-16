@@ -163,6 +163,17 @@ RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/opencode \
     && echo 'exec "$REAL_BIN" "$@"' >> /opt/yolobox/bin/opencode \
     && chmod +x /opt/yolobox/bin/opencode
 
+# Vibe wrapper (Mistral devstral)
+RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/vibe \
+    && echo 'exec "$REAL_BIN" "$@"' >> /opt/yolobox/bin/vibe \
+    && chmod +x /opt/yolobox/bin/vibe
+
+# Devstral wrapper (alias to vibe)
+RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/devstral \
+    && sed -i 's/CMD=$(basename "$0")/CMD=vibe/' /opt/yolobox/bin/devstral \
+    && echo 'exec "$REAL_BIN" "$@"' >> /opt/yolobox/bin/devstral \
+    && chmod +x /opt/yolobox/bin/devstral
+
 # Copilot wrapper
 RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/copilot \
     && echo 'exec "$REAL_BIN" --yolo "$@"' >> /opt/yolobox/bin/copilot \
@@ -189,7 +200,7 @@ RUN printf '%s\n' \
     chmod +x /usr/local/bin/yolobox-uid-fix.sh
 
 # Create entrypoint script
-RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-files && \
+RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instructions /host-files && \
     printf '%s\n' \
     '#!/bin/bash' \
     '' \
@@ -241,6 +252,14 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    sudo chown -R yolo:yolo /home/yolo/.gemini' \
     'fi' \
     '' \
+    '# Copy Mistral Vibe config from host staging area if present' \
+    'if [ -d /host-vibe/.vibe ]; then' \
+    '    echo -e "\033[33m→ Copying host Mistral Vibe config to container\033[0m" >&2' \
+    '    sudo rm -rf /home/yolo/.vibe' \
+    '    sudo cp -a /host-vibe/.vibe /home/yolo/.vibe' \
+    '    sudo chown -R yolo:yolo /home/yolo/.vibe' \
+    'fi' \
+    '' \
     '# Copy git config from host staging area if present' \
     'if [ -f /host-git/.gitconfig ]; then' \
     '    echo -e "\033[33m→ Copying host git config to container\033[0m" >&2' \
@@ -277,6 +296,15 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    mkdir -p /home/yolo/.gemini' \
     '    sudo cp -a "$GEMINI_MD" /home/yolo/.gemini/GEMINI.md' \
     '    sudo chown -R yolo:yolo /home/yolo/.gemini' \
+    '    COPIED_AGENT_INSTRUCTIONS=1' \
+    'fi' \
+    '# Mistral Vibe: VIBE.md' \
+    'VIBE_MD="/host-agent-instructions/vibe/VIBE.md"' \
+    '[ ! -f "$VIBE_MD" ] && [ -f "$HF/agent-instructions/vibe/VIBE.md" ] && VIBE_MD="$HF/agent-instructions/vibe/VIBE.md"' \
+    'if [ -f "$VIBE_MD" ]; then' \
+    '    mkdir -p /home/yolo/.vibe' \
+    '    sudo cp -a "$VIBE_MD" /home/yolo/.vibe/VIBE.md' \
+    '    sudo chown -R yolo:yolo /home/yolo/.vibe' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
     '# Codex: AGENTS.md' \
@@ -370,6 +398,9 @@ RUN NPM_CONFIG_PREFIX="" npm install -g --no-audit --no-fund \
     opencode-ai \
     @github/copilot \
     && NPM_CONFIG_PREFIX="" npm cache clean --force
+
+# Install Mistral Vibe (vibe/devstral) via pip
+RUN pip install --no-cache-dir --break-system-packages mistral-vibe
 USER yolo
 
 # Copy Claude Code from installer stage

@@ -9,7 +9,7 @@
 
 **Let your AI go full send. Your home directory stays home.**
 
-Run [Claude Code](https://claude.ai/code), [Codex](https://openai.com/codex/), or any AI coding agent in "yolo mode" without nuking your home directory.
+Run [Claude Code](https://claude.ai/code), [Codex](https://openai.com/codex/), [Mistral Vibe](https://mistral.ai/news/vibe/), or any AI coding agent in "yolo mode" without nuking your home directory.
 
 ## The Problem
 
@@ -43,12 +43,12 @@ cd /path/to/your/project
 yolobox claude    # Let it rip
 ```
 
-Or use any other AI tool: `yolobox codex`, `yolobox gemini`, `yolobox copilot`.
+Or use any other AI tool: `yolobox vibe`, `yolobox gemini`, `yolobox copilot`.
 
 ## What's in the Box?
 
 The base image comes batteries-included:
-- **AI CLIs**: Claude Code, Gemini CLI, OpenAI Codex, OpenCode, Copilot (all pre-configured for full-auto mode!)
+- **AI CLIs**: Claude Code, Gemini CLI, Mistral Vibe, OpenAI Codex, OpenCode, Copilot (all pre-configured for full-auto mode!)
 - **Runtimes**: Node.js 22, Python 3, Go, Bun
 - **Build tools**: make, cmake, gcc
 - **Git** + **GitHub CLI**
@@ -65,6 +65,7 @@ Inside yolobox, the AI CLIs are aliased to skip all permission prompts:
 | `claude` | `claude --dangerously-skip-permissions` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox` |
 | `gemini` | `gemini --yolo` |
+| `vibe` | `vibe` (Mistral devstral) |
 | `opencode` | `opencode` (no yolo flag available yet) |
 | `copilot` | `copilot --yolo` |
 
@@ -144,7 +145,7 @@ yolobox claude --runtime podman      # Podman
 ```bash
 # AI tool shortcuts (recommended)
 yolobox claude              # Run Claude Code
-yolobox codex               # Run OpenAI Codex
+yolobox vibe                # Run Mistral Vibe (devstral)
 yolobox gemini              # Run Gemini CLI
 yolobox opencode            # Run OpenCode
 yolobox copilot             # Run GitHub Copilot
@@ -206,6 +207,7 @@ Files copied (if they exist on your host):
 |------|--------|-------------|
 | Claude | `~/.claude/CLAUDE.md` | `/home/yolo/.claude/CLAUDE.md` |
 | Gemini | `~/.gemini/GEMINI.md` | `/home/yolo/.gemini/GEMINI.md` |
+| Mistral | `~/.vibe/VIBE.md` | `/home/yolo/.vibe/VIBE.md` |
 | Codex | `~/.codex/AGENTS.md` | `/home/yolo/.codex/AGENTS.md` |
 | Copilot | `~/.copilot/agents/` | `/home/yolo/.copilot/agents/` |
 
@@ -222,6 +224,7 @@ These are automatically passed into the container if set:
 - `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`
 - `OPENROUTER_API_KEY`
 - `GEMINI_API_KEY`
+- `MISTRAL_API_KEY`
 
 > **Note:** On macOS, `gh` CLI stores tokens in Keychain, not environment variables. Use `--gh-token` (or `gh_token = true` in config) to extract and forward your GitHub CLI token.
 
@@ -245,6 +248,7 @@ These are automatically passed into the container if set:
 | `--readonly-project` | Mount project read-only (outputs go to `/output`) |
 | `--claude-config` | Copy host `~/.claude` config into container |
 | `--gemini-config` | Copy host `~/.gemini` config into container |
+| `--vibe-config` | Copy host `~/.vibe` config into container |
 | `--git-config` | Copy host `~/.gitconfig` into container |
 | `--gh-token` | Forward GitHub CLI token (extracts from keychain via `gh auth token`) |
 | `--copy-agent-instructions` | Copy global agent instruction files (see configuration below) |

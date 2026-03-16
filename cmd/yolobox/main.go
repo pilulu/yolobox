@@ -62,6 +62,7 @@ var autoPassthroughEnvVars = []string{
 	"GH_TOKEN",
 	"OPENROUTER_API_KEY",
 	"GEMINI_API_KEY",
+	"MISTRAL_API_KEY",
 }
 
 // Tool shortcuts - these become direct subcommands (e.g., "yolobox claude")
@@ -69,6 +70,8 @@ var toolShortcuts = []string{
 	"claude",
 	"codex",
 	"gemini",
+	"vibe",
+	"devstral",
 	"opencode",
 	"copilot",
 }
@@ -96,6 +99,7 @@ type Config struct {
 	Scratch               bool     `toml:"scratch"`
 	ClaudeConfig          bool     `toml:"claude_config"`
 	GeminiConfig          bool     `toml:"gemini_config"`
+	VibeConfig            bool     `toml:"vibe_config"`
 	GitConfig             bool     `toml:"git_config"`
 	GhToken               bool     `toml:"gh_token"`
 	CopyAgentInstructions bool     `toml:"copy_agent_instructions"`
@@ -430,6 +434,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --readonly-project    Mount project directory read-only")
 	fmt.Fprintln(os.Stderr, "  --claude-config       Copy host Claude config to container")
 	fmt.Fprintln(os.Stderr, "  --gemini-config       Copy host Gemini config to container")
+	fmt.Fprintln(os.Stderr, "  --vibe-config         Copy host Mistral Vibe config to container")
 	fmt.Fprintln(os.Stderr, "  --git-config          Copy host git config to container")
 	fmt.Fprintln(os.Stderr, "  --gh-token            Forward GitHub CLI token (from gh auth token)")
 	fmt.Fprintln(os.Stderr, "  --copy-agent-instructions  Copy global agent instruction files")
@@ -489,6 +494,7 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 		scratch               bool
 		claudeConfig          bool
 		geminiConfig          bool
+		vibeConfig            bool
 		gitConfig             bool
 		ghToken               bool
 		copyAgentInstructions bool
@@ -522,9 +528,10 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	fs.BoolVar(&scratch, "scratch", false, "fresh environment, no persistent volumes")
 	fs.BoolVar(&claudeConfig, "claude-config", false, "copy host Claude config to container")
 	fs.BoolVar(&geminiConfig, "gemini-config", false, "copy host Gemini config to container")
+	fs.BoolVar(&vibeConfig, "vibe-config", false, "copy host Mistral Vibe config to container")
 	fs.BoolVar(&gitConfig, "git-config", false, "copy host git config to container")
 	fs.BoolVar(&ghToken, "gh-token", false, "forward GitHub CLI token (from gh auth token)")
-	fs.BoolVar(&copyAgentInstructions, "copy-agent-instructions", false, "copy agent instruction files (CLAUDE.md, GEMINI.md, AGENTS.md)")
+	fs.BoolVar(&copyAgentInstructions, "copy-agent-instructions", false, "copy agent instruction files (CLAUDE.md, GEMINI.md, AGENTS.md, VIBE.md)")
 	fs.BoolVar(&docker, "docker", false, "mount Docker socket and join shared network")
 	fs.BoolVar(&setup, "setup", false, "run interactive setup before starting")
 	fs.Var(&mounts, "mount", "extra mount src:dst")
@@ -583,6 +590,9 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	}
 	if geminiConfig {
 		cfg.GeminiConfig = true
+	}
+	if vibeConfig {
+		cfg.VibeConfig = true
 	}
 	if gitConfig {
 		cfg.GitConfig = true
@@ -856,6 +866,9 @@ func mergeConfig(dst *Config, src Config) {
 	if src.GeminiConfig {
 		dst.GeminiConfig = true
 	}
+	if src.VibeConfig {
+		dst.VibeConfig = true
+	}
 	if src.GitConfig {
 		dst.GitConfig = true
 	}
@@ -1001,6 +1014,7 @@ func printConfig(cfg Config) error {
 	fmt.Printf("%sscratch:%s %t\n", colorBold, colorReset, cfg.Scratch)
 	fmt.Printf("%sclaude_config:%s %t\n", colorBold, colorReset, cfg.ClaudeConfig)
 	fmt.Printf("%sgemini_config:%s %t\n", colorBold, colorReset, cfg.GeminiConfig)
+	fmt.Printf("%svibe_config:%s %t\n", colorBold, colorReset, cfg.VibeConfig)
 	fmt.Printf("%sgit_config:%s %t\n", colorBold, colorReset, cfg.GitConfig)
 	fmt.Printf("%sgh_token:%s %t\n", colorBold, colorReset, cfg.GhToken)
 	fmt.Printf("%scopy_agent_instructions:%s %t\n", colorBold, colorReset, cfg.CopyAgentInstructions)
@@ -1074,6 +1088,18 @@ func saveGlobalConfig(cfg Config) error {
 	}
 	if cfg.GhToken {
 		lines = append(lines, "gh_token = true")
+	}
+	if cfg.ClaudeConfig {
+		lines = append(lines, "claude_config = true")
+	}
+	if cfg.GeminiConfig {
+		lines = append(lines, "gemini_config = true")
+	}
+	if cfg.VibeConfig {
+		lines = append(lines, "vibe_config = true")
+	}
+	if cfg.CopyAgentInstructions {
+		lines = append(lines, "copy_agent_instructions = true")
 	}
 	if cfg.SSHAgent {
 		lines = append(lines, "ssh_agent = true")
@@ -1995,6 +2021,28 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		}
 	}
 
+	// Mount Mistral Vibe config from host to staging area (copied to /home/yolo by entrypoint)
+	if cfg.VibeConfig {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, nil, err
+		}
+		vibeConfigDir := filepath.Join(home, ".vibe")
+		if _, err := os.Stat(vibeConfigDir); err == nil {
+			mountSrc := vibeConfigDir
+			if dirContainsSymlinks(vibeConfigDir) {
+				staged, err := stageDirResolvingSymlinks(vibeConfigDir)
+				if err != nil {
+					warn("Failed to resolve symlinks in %s: %s", vibeConfigDir, err)
+				} else {
+					mountSrc = staged
+					cleanupPaths = append(cleanupPaths, staged)
+				}
+			}
+			args = append(args, "-v", mountSrc+":/host-vibe/.vibe:ro")
+		}
+	}
+
 	// Mount git config from host to staging area (copied to /home/yolo by entrypoint)
 	if cfg.GitConfig {
 		home, err := os.UserHomeDir()
@@ -2034,6 +2082,15 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 				appleContainerFiles[geminiMd] = "agent-instructions/gemini/GEMINI.md"
 			} else {
 				args = append(args, "-v", geminiMd+":/host-agent-instructions/gemini/GEMINI.md:ro")
+			}
+		}
+		// Mistral Vibe: ~/.vibe/VIBE.md
+		vibeMd := filepath.Join(home, ".vibe", "VIBE.md")
+		if _, err := os.Stat(vibeMd); err == nil {
+			if appleContainer {
+				appleContainerFiles[vibeMd] = "agent-instructions/vibe/VIBE.md"
+			} else {
+				args = append(args, "-v", vibeMd+":/host-agent-instructions/vibe/VIBE.md:ro")
 			}
 		}
 		// Codex: ~/.codex/AGENTS.md
