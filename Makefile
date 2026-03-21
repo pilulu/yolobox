@@ -48,12 +48,26 @@ smoke-test: build
 		echo "  ✗ claude"; \
 		failed=1; \
 	fi; \
+	if ./$(BINARY) run --scratch codex --version >/dev/null 2>&1; then \
+		echo "  ✓ codex"; \
+	else \
+		echo "  ✗ codex"; \
+		failed=1; \
+	fi; \
 	IMG_VER=$$(./$(BINARY) run --scratch /usr/local/bin/claude --version 2>/dev/null | head -1); \
 	RUN_VER=$$(./$(BINARY) run claude --version 2>/dev/null | head -1); \
 	if [ "$$IMG_VER" = "$$RUN_VER" ]; then \
 		echo "  ✓ claude version pinned ($$RUN_VER)"; \
 	else \
 		echo "  ✗ claude version mismatch: image=$$IMG_VER, got=$$RUN_VER"; \
+		failed=1; \
+	fi; \
+	IMG_VER=$$(./$(BINARY) run --scratch env NO_YOLO=1 codex --version 2>/dev/null | head -1); \
+	RUN_VER=$$(./$(BINARY) run --scratch codex --version 2>/dev/null | head -1); \
+	if [ "$$IMG_VER" = "$$RUN_VER" ]; then \
+		echo "  ✓ codex wrapper matches real binary ($$RUN_VER)"; \
+	else \
+		echo "  ✗ codex version mismatch: real=$$IMG_VER, wrapper=$$RUN_VER"; \
 		failed=1; \
 	fi; \
 	[ $$failed -eq 0 ]

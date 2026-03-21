@@ -69,12 +69,14 @@ Inside yolobox, the AI CLIs are aliased to skip all permission prompts:
 | Command | Expands to |
 |---------|------------|
 | `claude` | `claude --dangerously-skip-permissions` |
-| `codex` | `codex --dangerously-bypass-approvals-and-sandbox` |
+| `codex` | `codex --ask-for-approval never --sandbox danger-full-access` |
 | `gemini` | `gemini --yolo` |
 | `opencode` | `opencode` (no yolo flag available yet) |
 | `copilot` | `copilot --yolo` |
 
 No confirmations, no guardrails—just pure unfiltered AI, the way nature intended.
+
+For Codex, yolobox pins approval and sandbox mode explicitly so upstream trust defaults and Linux sandbox backend changes do not change the wrapper behavior.
 
 ## Project-Level Container Customization
 

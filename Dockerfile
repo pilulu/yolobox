@@ -150,7 +150,7 @@ RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/claude \
 
 # Codex wrapper
 RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/codex \
-    && echo 'exec "$REAL_BIN" --dangerously-bypass-approvals-and-sandbox "$@"' >> /opt/yolobox/bin/codex \
+    && echo 'exec "$REAL_BIN" --ask-for-approval never --sandbox danger-full-access "$@"' >> /opt/yolobox/bin/codex \
     && chmod +x /opt/yolobox/bin/codex
 
 # Gemini wrapper
