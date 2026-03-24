@@ -9,6 +9,8 @@
 
 **Let your AI go full send. Your home directory stays home.**
 
+Docs: [yolobox.dev](https://yolobox.dev)
+
 Run [Claude Code](https://claude.ai/code), [Codex](https://openai.com/codex/), or any AI coding agent in "yolo mode" without nuking your home directory.
 
 ## The Problem
