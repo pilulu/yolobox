@@ -17,7 +17,7 @@
 
 <style>
 .ascii-logo-wrap {
-  width: min(100%, 30rem);
+  width: min(100%, 33rem);
   margin: 0 0 24px;
 }
 
