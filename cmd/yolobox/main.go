@@ -1977,7 +1977,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		args = append(args, "-e", env)
 	}
 
-	projectMountSource, projectOverlayMounts, overlayCleanupPaths, err := buildProjectFilterMounts(cfg, absProject)
+	projectMountSource, overlayCleanupPaths, err := buildProjectFilterMounts(cfg, absProject)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2193,10 +2193,6 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		args = append(args, "-v", resolved)
 	}
 
-	for _, mount := range projectOverlayMounts {
-		args = append(args, "-v", formatProjectOverlayMount(mount))
-	}
-
 	// Resource & security controls
 	args = appendRunFlag(args, "cpus", cfg.CPUs)
 	args = appendRunFlag(args, "memory", cfg.Memory)
@@ -2318,12 +2314,6 @@ type projectCopyAsSpec struct {
 	src string
 	dst string
 	rel string
-}
-
-type projectOverlayMount struct {
-	src      string
-	dst      string
-	readOnly bool
 }
 
 func resolveHostPath(path string, projectDir string) (string, error) {
@@ -2551,14 +2541,14 @@ func parseCopyAsSpec(spec string, projectDir string) (projectCopyAsSpec, error) 
 	return projectCopyAsSpec{src: src, dst: dst, rel: filepath.ToSlash(rel)}, nil
 }
 
-func buildProjectFilterMounts(cfg Config, projectDir string) (string, []projectOverlayMount, []string, error) {
+func buildProjectFilterMounts(cfg Config, projectDir string) (string, []string, error) {
 	if len(cfg.Exclude) == 0 && len(cfg.CopyAs) == 0 {
-		return projectDir, nil, nil, nil
+		return projectDir, nil, nil
 	}
 
 	excludedPaths, err := resolveExcludedProjectPaths(cfg.Exclude, projectDir)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, err
 	}
 
 	excludedByRel := make(map[string]projectPathInfo, len(excludedPaths))
@@ -2574,7 +2564,7 @@ func buildProjectFilterMounts(cfg Config, projectDir string) (string, []projectO
 	for _, rawSpec := range cfg.CopyAs {
 		spec, err := parseCopyAsSpec(rawSpec, projectDir)
 		if err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		}
 		copyAsByRel[spec.rel] = spec
 		for parent := path.Dir(spec.rel); parent != "." && parent != "/"; parent = path.Dir(parent) {
@@ -2584,7 +2574,7 @@ func buildProjectFilterMounts(cfg Config, projectDir string) (string, []projectO
 
 	viewRoot, err := os.MkdirTemp(projectDir, ".yolobox-project-view-*")
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("failed to create temp dir for project filtering: %w", err)
+		return "", nil, fmt.Errorf("failed to create temp dir for project filtering: %w", err)
 	}
 	cleanupPaths := []string{viewRoot}
 	viewRootBase := filepath.Base(viewRoot)
@@ -2668,17 +2658,10 @@ func buildProjectFilterMounts(cfg Config, projectDir string) (string, []projectO
 	}
 
 	if err := buildDir(projectDir, ""); err != nil {
-		return "", nil, cleanupPaths, err
+		return "", cleanupPaths, err
 	}
 
-	return viewRoot, nil, cleanupPaths, nil
-}
-
-func formatProjectOverlayMount(mount projectOverlayMount) string {
-	if mount.readOnly {
-		return mount.src + ":" + mount.dst + ":ro"
-	}
-	return mount.src + ":" + mount.dst
+	return viewRoot, cleanupPaths, nil
 }
 
 func resolvedRuntimeName(name string) string {
