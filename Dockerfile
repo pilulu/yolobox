@@ -169,6 +169,16 @@ RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/copilot \
     && echo 'exec "$REAL_BIN" --yolo "$@"' >> /opt/yolobox/bin/copilot \
     && chmod +x /opt/yolobox/bin/copilot
 
+# Vibe wrapper
+RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/vibe \
+    && echo 'exec "$REAL_BIN" "$@"' >> /opt/yolobox/bin/vibe \
+    && chmod +x /opt/yolobox/bin/vibe
+
+# Mistral wrapper (alias to vibe)
+RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/mistral \
+    && echo 'exec "$REAL_BIN" "$@"' >> /opt/yolobox/bin/mistral \
+    && chmod +x /opt/yolobox/bin/mistral
+
 
 # Configure npm to use a user-writable prefix so yolo can `npm install -g` without sudo
 ENV NPM_CONFIG_PREFIX=/home/yolo/.npm-global
@@ -190,7 +200,7 @@ RUN printf '%s\n' \
     chmod +x /usr/local/bin/yolobox-uid-fix.sh
 
 # Create entrypoint script
-RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-files && \
+RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instructions /host-files && \
     printf '%s\n' \
     '#!/bin/bash' \
     '' \
@@ -240,6 +250,14 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    sudo rm -rf /home/yolo/.gemini' \
     '    sudo cp -a /host-gemini/.gemini /home/yolo/.gemini' \
     '    sudo chown -R yolo:yolo /home/yolo/.gemini' \
+    'fi' \
+    '' \
+    '# Copy Vibe config from host staging area if present' \
+    'if [ -d /host-vibe/.vibe ]; then' \
+    '    echo -e "\033[33m→ Copying host Vibe config to container\033[0m" >&2' \
+    '    sudo rm -rf /home/yolo/.vibe' \
+    '    sudo cp -a /host-vibe/.vibe /home/yolo/.vibe' \
+    '    sudo chown -R yolo:yolo /home/yolo/.vibe' \
     'fi' \
     '' \
     '# Copy git config from host staging area if present' \
@@ -376,6 +394,8 @@ RUN NPM_CONFIG_PREFIX="" npm install -g --no-audit --no-fund \
     opencode-ai \
     @github/copilot \
     && NPM_CONFIG_PREFIX="" npm cache clean --force
+
+RUN pip install --no-cache-dir --break-system-packages mistral-vibe
 USER yolo
 
 # Copy Claude Code from installer stage
