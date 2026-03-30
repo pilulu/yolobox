@@ -102,3 +102,4 @@ Also update [README.md](README.md) when user-facing behavior changes.
 - When yolobox itself runs inside another yolobox, temp mount sources must live under an existing host-visible bind mount like the project path. Inner-container `/tmp` is not visible to the outer Docker daemon.
 - Brand and social assets must not depend on runtime font rendering for the ASCII wordmark. Generate committed image assets from deterministic shapes, or social-card rasterization can drop the text and the site logo can drift from the share image.
 - Rootless Podman named volumes need `:U` alongside `:Z` when using `--userns=keep-id`, or older subordinate-ID ownership on `yolobox-home` reappears in-container as uid/gid 999 and breaks `/home/yolo`.
+- If the entrypoint remaps `yolo` to the host project UID/GID, it must also re-own `/output`; otherwise `--readonly-project` leaves the writable output volume stuck at the image's original 1000:1000 ownership.
