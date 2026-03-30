@@ -415,6 +415,46 @@ func TestBuildRunArgsReadonlyProject(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgsRootlessPodmanPersistentVolumes(t *testing.T) {
+	runtimeDir := t.TempDir()
+	podmanPath := filepath.Join(runtimeDir, "podman")
+	if err := os.WriteFile(podmanPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("failed to write fake podman runtime: %v", err)
+	}
+	t.Setenv("PATH", runtimeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prevCurrentUID := currentUID
+	currentUID = func() int { return 501 }
+	t.Cleanup(func() {
+		currentUID = prevCurrentUID
+	})
+
+	cfg := Config{
+		Runtime:         "podman",
+		Image:           "test-image",
+		ReadonlyProject: true,
+	}
+
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	argsStr := strings.Join(args, " ")
+	if !strings.Contains(argsStr, "--userns=keep-id:uid=1000,gid=1000") {
+		t.Fatalf("expected rootless podman keep-id user namespace, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "yolobox-home:/home/yolo:Z,U") {
+		t.Fatalf("expected rootless podman home volume to use :Z,U, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "yolobox-cache:/var/cache:Z,U") {
+		t.Fatalf("expected rootless podman cache volume to use :Z,U, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "yolobox-output:/output:Z,U") {
+		t.Fatalf("expected rootless podman output volume to use :Z,U, got %s", argsStr)
+	}
+}
+
 func TestBuildRunArgsProjectFiltering(t *testing.T) {
 	projectDir := t.TempDir()
 	envPath := filepath.Join(projectDir, ".env")

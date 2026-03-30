@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var currentUID = os.Getuid
+
 // isAppleContainer checks if the resolved runtime is Apple's container tool.
 func isAppleContainer(runtime string) bool {
 	path, err := resolveRuntime(runtime)
@@ -29,7 +31,16 @@ func isRootlessPodman(runtime string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.HasSuffix(path, "/podman") && os.Getuid() != 0
+	return strings.HasSuffix(path, "/podman") && currentUID() != 0
+}
+
+func persistentVolumeMount(name, target string, rootlessPodman bool) string {
+	if !rootlessPodman {
+		return name + ":" + target
+	}
+	// :Z keeps SELinux labels stable across runs; :U migrates existing rootless
+	// Podman volumes from subordinate-ID ownership to the keep-id container user.
+	return name + ":" + target + ":Z,U"
 }
 
 // dirContainsSymlinks reports whether dir contains any symbolic links.
