@@ -194,6 +194,7 @@ RUN printf '%s\n' \
     'usermod -u "$HOST_UID" -o yolo 2>/dev/null' \
     'groupmod -g "$HOST_GID" -o yolo 2>/dev/null' \
     'chown -R "$HOST_UID:$HOST_GID" /home/yolo 2>/dev/null' \
+    'chown -R "$HOST_UID:$HOST_GID" /output 2>/dev/null' \
     '[ -n "$YOLOBOX_SAVED_PATH" ] && export PATH="$YOLOBOX_SAVED_PATH" && unset YOLOBOX_SAVED_PATH' \
     'exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --init-groups -- "$@"' \
     > /usr/local/bin/yolobox-uid-fix.sh && \

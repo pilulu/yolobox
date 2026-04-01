@@ -1072,7 +1072,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		if cfg.Scratch {
 			args = append(args, "-v", "/output") // anonymous volume, deleted with container
 		} else {
-			args = append(args, "-v", "yolobox-output:/output")
+			args = append(args, "-v", persistentVolumeMount("yolobox-output", "/output", rootlessPodman))
 		}
 	}
 	args = append(args, "-v", projectMount)
@@ -1080,15 +1080,11 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	// Named volumes for persistence (skip if --scratch).
 	// Rootless Podman on SELinux-enabled hosts assigns per-container MCS
 	// labels; without :Z, files created in one run are inaccessible to the
-	// next. Docker silently ignores this suffix.
+	// next. :U also repairs older keep-id volumes that were created with
+	// subordinate-ID ownership and now appear as uid/gid 999 in-container.
 	if !cfg.Scratch {
-		if rootlessPodman {
-			args = append(args, "-v", "yolobox-home:/home/yolo:Z")
-			args = append(args, "-v", "yolobox-cache:/var/cache:Z")
-		} else {
-			args = append(args, "-v", "yolobox-home:/home/yolo")
-			args = append(args, "-v", "yolobox-cache:/var/cache")
-		}
+		args = append(args, "-v", persistentVolumeMount("yolobox-home", "/home/yolo", rootlessPodman))
+		args = append(args, "-v", persistentVolumeMount("yolobox-cache", "/var/cache", rootlessPodman))
 	}
 
 	// For Apple container, we need to collect files and mount via a temp directory
