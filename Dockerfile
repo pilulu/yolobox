@@ -413,6 +413,22 @@ RUN mkdir -p /home/yolo/.local/bin && \
 WORKDIR /home/yolo
 
 # Working directory is set by yolobox CLI to the actual project path
+USER root
+RUN apt-get update && apt-get install -y curl gnupg
+RUN curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14AA40EC0831756756D7F66C4F4EA0AAE5267A6C" | gpg --dearmor > /usr/share/keyrings/ondrej-php.gpg \
+    && chmod 644 /usr/share/keyrings/ondrej-php.gpg \
+    && . /etc/os-release && echo "deb [signed-by=/usr/share/keyrings/ondrej-php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/ondrej-php.list
+
+RUN apt-get update && bash -c "apt-get install -y \
+    php7.4-{gd,pdo,mysql,xdebug,intl,xml,curl,mbstring,bcmath,redis,imagick,zip,fpm} \
+    php8.1-{gd,pdo,mysql,xdebug,intl,xml,curl,mbstring,bcmath,redis,imagick,zip,fpm} \
+    php8.2-{gd,pdo,mysql,xdebug,intl,xml,curl,mbstring,bcmath,redis,imagick,zip,fpm} \
+    php8.3-{gd,pdo,mysql,xdebug,intl,xml,curl,mbstring,bcmath,redis,imagick,zip,fpm} \
+    php8.4-{gd,pdo,mysql,xdebug,intl,xml,curl,mbstring,bcmath,redis,imagick,zip,fpm} \
+    mariadb-server \
+    composer" \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+USER yolo
 
 ENTRYPOINT ["/usr/local/bin/yolobox-entrypoint.sh"]
 CMD ["bash"]

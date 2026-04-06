@@ -20,8 +20,8 @@ lint:
 
 image:
 	@docker buildx version >/dev/null 2>&1 && \
-		docker buildx build -t $(IMAGE) . || \
-		docker build -t $(IMAGE) .
+		docker buildx build --no-cache -t $(IMAGE) . || \
+		docker build --no-cache -t $(IMAGE) .
 
 SMOKE_TOOLS := node bun python3 uv gh fish fd bat rg eza
 
