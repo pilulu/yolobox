@@ -10,6 +10,12 @@ Default workflow for this repo:
 2. Verify it thoroughly.
 3. Commit the change before finishing.
 
+Whenever behavior, UX, defaults, flags, docs, or built-in agent guidance change, audit the matching user-facing surfaces in this repo and update them too:
+
+- [README.md](README.md)
+- the docs site under [docs/](docs/)
+- the bundled skills under [skills/](skills/)
+
 Do not stop at unit tests when behavior can be exercised for real. If a change affects runtime behavior, flags, mounts, image builds, config loading, or release automation, run the actual path and verify the output.
 
 If full end-to-end verification is blocked by the environment, state exactly what was run, what was not run, and why.
@@ -71,7 +77,7 @@ Areas to check when adding flags or config:
 - `runSetup`
 - the runtime path that consumes the option
 
-Also update [README.md](README.md) when user-facing behavior changes.
+Also update [README.md](README.md), the docs site under [docs/](docs/), and the bundled skills under [skills/](skills/) when user-facing behavior or agent behavior changes.
 
 ## Hard Learnings
 
@@ -94,6 +100,7 @@ Also update [README.md](README.md) when user-facing behavior changes.
 - Codex trust is separate from execution mode. `--ask-for-approval never` plus `--sandbox danger-full-access` still shows the trust prompt for a new directory, so verify trusted-project startup separately when changing Codex launch flags.
 - Any `sudo` re-exec path in the entrypoint must preserve `PATH` (for example `--preserve-env=PATH`) or `/opt/yolobox/bin` wrappers get bypassed and AI CLIs lose pinned yolo flags.
 - Avoid parallel Git commands in this repo while another Git operation is active. We have repeatedly hit misleading `.git/index.lock` failures from overlapping status/checkout/rebase calls.
+- Parallel `yolobox run` sessions against the same repo can also race on the entrypoint's `git config --global --add safe.directory ...` update and trip `/home/yolo/.gitconfig` lock errors. Run end-to-end runtime verifications sequentially when they share the same persistent home volume.
 - GitHub Pages deployments that use a custom Actions workflow should set the custom domain in the repository Pages settings. A checked-in `CNAME` file is ignored in that flow and only adds confusion.
 - For the VitePress docs site, stop the live dev container before running `npm run docs:build`. The dev server and build both write `docs/.vitepress/dist`, and the shared bind mount causes flaky build conflicts if both are active.
 - Social-card support is not just `og:image`. Ship a real `robots.txt`, generate a sitemap, and include explicit `og:image:*` plus `twitter:image:alt` metadata so crawlers and card parsers have stable image hints.
@@ -103,3 +110,6 @@ Also update [README.md](README.md) when user-facing behavior changes.
 - Brand and social assets must not depend on runtime font rendering for the ASCII wordmark. Generate committed image assets from deterministic shapes, or social-card rasterization can drop the text and the site logo can drift from the share image.
 - Rootless Podman named volumes need `:U` alongside `:Z` when using `--userns=keep-id`, or older subordinate-ID ownership on `yolobox-home` reappears in-container as uid/gid 999 and breaks `/home/yolo`.
 - If the entrypoint remaps `yolo` to the host project UID/GID, it must also re-own `/output`; otherwise `--readonly-project` leaves the writable output volume stuck at the image's original 1000:1000 ownership.
+- Built-in skills live under `skills/` as standard Agent Skills packages. When editing them, keep `SKILL.md` spec-compliant and validate with `uvx --from git+https://github.com/agentskills/agentskills#subdirectory=skills-ref skills-ref validate ./skills/<name>`.
+- When a built-in skill is renamed, the entrypoint must remove the old skill directory from `/home/yolo/.codex/skills` during startup. The named home volume preserves stale skill folders across image upgrades.
+- Built-in agent guidance should be injected into `CLAUDE.md` and `AGENTS.md` as a managed block. Do not replace user instruction files outright just to teach agents about yolobox behavior.

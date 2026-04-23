@@ -231,18 +231,20 @@ yolobox claude --readonly-project --exclude ".env*" --copy-as ".env.sandbox:.env
 
 ### Copying Global Agent Instructions
 
-The `--copy-agent-instructions` flag copies your **global/user-level** agent instruction files into the container. This is useful when you have custom rules or preferences defined globally that you want available inside yolobox.
+The `--copy-agent-instructions` flag copies your **global/user-level** agent instruction files and skills into the container. This is useful when you have custom rules, preferences, or reusable skills defined globally that you want available inside yolobox.
 
 Files copied (if they exist on your host):
 
 | Tool | Source | Destination |
 |------|--------|-------------|
 | Claude | `~/.claude/CLAUDE.md` | `/home/yolo/.claude/CLAUDE.md` |
+| Claude skills | `~/.claude/skills/` | `/home/yolo/.claude/skills/` |
 | Gemini | `~/.gemini/GEMINI.md` | `/home/yolo/.gemini/GEMINI.md` |
 | Codex | `~/.codex/AGENTS.md` | `/home/yolo/.codex/AGENTS.md` |
+| Codex skills | `~/.codex/skills/` | `/home/yolo/.codex/skills/` |
 | Copilot | `~/.copilot/agents/` | `/home/yolo/.copilot/agents/` |
 
-**Note:** This only copies global instruction files, not full configs (credentials, settings, history). For full tool configs, use `--claude-config`, `--codex-config`, or `--gemini-config`.
+**Note:** This copies instructions and skills, not full configs (credentials, settings, history). For full tool configs, use `--claude-config`, `--codex-config`, or `--gemini-config`.
 
 You can also set `copy_agent_instructions = true` in your config file for persistent use.
 
@@ -255,6 +257,28 @@ These are automatically passed into the container if set:
 - `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`
 - `OPENROUTER_API_KEY`
 - `GEMINI_API_KEY`
+
+### Runtime Context Manifest
+
+Every yolobox session also mounts a machine-readable context manifest at `/run/yolobox/context.json` and exports its path as `YOLOBOX_CONTEXT_FILE`.
+
+This gives agents and scripts a stable way to confirm they are inside yolobox and inspect the resolved launch context without scraping CLI output. The manifest includes:
+
+- yolobox version, schema version, and `inside_yolobox` confirmation
+- configured and selected runtime
+- project, home, and output paths inside the container
+- launch command, working directory, and interactive mode
+- resolved config fields such as network, mounts, readonly mode, Docker access, and customization settings
+- forwarded environment variable keys, without exposing their values
+
+The repo's [`skills/`](skills) directory is also the canonical Agent Skills source for yolobox:
+
+- [`skills/yolobox`](skills/yolobox) is the inside-the-box skill. It orients the agent to the trusted yolobox sandbox it is running in, then reads the manifest and summarizes the current constraints and freedoms. yolobox currently installs this built-in for Claude and Codex sessions inside the container.
+- [`skills/yolobox-orchestrator`](skills/yolobox-orchestrator) is the host-side skill for agents that need to launch or control yolobox sessions from outside the container.
+
+For Claude and Codex, yolobox also injects a managed instruction block into `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` so the agent knows to use the `yolobox` skill when sandbox assumptions matter.
+
+Both skills follow the standard Agent Skills layout so they can be validated and published from this repo instead of being maintained as image-only one-offs.
 
 > **Note:** On macOS, `gh` CLI stores tokens in Keychain, not environment variables. Use `--gh-token` (or `gh_token = true` in config) to extract and forward your GitHub CLI token.
 
@@ -283,7 +307,7 @@ These are automatically passed into the container if set:
 | `--gemini-config` | Copy host `~/.gemini` config into container |
 | `--git-config` | Copy host `~/.gitconfig` into container |
 | `--gh-token` | Forward GitHub CLI token (extracts from keychain via `gh auth token`) |
-| `--copy-agent-instructions` | Copy global agent instruction files (see configuration below) |
+| `--copy-agent-instructions` | Copy global agent instruction files and skills (see configuration below) |
 | `--docker` | Mount Docker socket and join shared network (see notes below) |
 | `--cpus <num>` | Limit CPUs available to the container (accepts fractions like `3.5`) |
 | `--memory <limit>` | Hard memory limit (e.g., `8g`, `1024m`) |

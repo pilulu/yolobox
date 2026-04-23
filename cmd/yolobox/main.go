@@ -249,7 +249,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --gemini-config       Copy host Gemini config to container")
 	fmt.Fprintln(os.Stderr, "  --git-config          Copy host git config to container")
 	fmt.Fprintln(os.Stderr, "  --gh-token            Forward GitHub CLI token (from gh auth token)")
-	fmt.Fprintln(os.Stderr, "  --copy-agent-instructions  Copy global agent instruction files")
+	fmt.Fprintln(os.Stderr, "  --copy-agent-instructions  Copy global agent instructions and skills")
 	fmt.Fprintln(os.Stderr, "  --docker              Mount Docker socket and join shared network")
 	fmt.Fprintln(os.Stderr, "  --cpus <count>        Limit number of CPUs (supports fractions)")
 	fmt.Fprintln(os.Stderr, "  --memory <size>       Cap memory usage (e.g., 4g, 512m)")
@@ -345,7 +345,7 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	fs.BoolVar(&geminiConfig, "gemini-config", false, "copy host Gemini config to container")
 	fs.BoolVar(&gitConfig, "git-config", false, "copy host git config to container")
 	fs.BoolVar(&ghToken, "gh-token", false, "forward GitHub CLI token (from gh auth token)")
-	fs.BoolVar(&copyAgentInstructions, "copy-agent-instructions", false, "copy agent instruction files (CLAUDE.md, GEMINI.md, AGENTS.md)")
+	fs.BoolVar(&copyAgentInstructions, "copy-agent-instructions", false, "copy agent instruction files and skills (CLAUDE.md, ~/.claude/skills, GEMINI.md, AGENTS.md, ~/.codex/skills)")
 	fs.BoolVar(&docker, "docker", false, "mount Docker socket and join shared network")
 	fs.BoolVar(&setup, "setup", false, "run interactive setup before starting")
 	fs.Var(&mounts, "mount", "extra mount src:dst")
@@ -1036,16 +1036,20 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 	}
 
 	// Auto-passthrough common API keys
+	autoPassthroughEnvKeys := make([]string, 0, len(autoPassthroughEnvVars))
 	for _, key := range autoPassthroughEnvVars {
 		if val := os.Getenv(key); val != "" {
+			autoPassthroughEnvKeys = append(autoPassthroughEnvKeys, key)
 			args = append(args, "-e", key+"="+val)
 		}
 	}
 
 	// Forward GitHub CLI token (extracted from keychain/credential store)
+	ghTokenForwarded := false
 	if cfg.GhToken {
 		if token := getGhToken(); token != "" {
 			args = append(args, "-e", "GH_TOKEN="+token)
+			ghTokenForwarded = true
 		}
 	}
 
@@ -1232,6 +1236,21 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 				args = append(args, "-v", claudeMd+":/host-agent-instructions/claude/CLAUDE.md:ro")
 			}
 		}
+		// Claude: ~/.claude/skills/ directory
+		claudeSkills := filepath.Join(home, ".claude", "skills")
+		if info, err := os.Stat(claudeSkills); err == nil && info.IsDir() {
+			mountSrc := claudeSkills
+			if dirContainsSymlinks(claudeSkills) {
+				staged, err := stageDirResolvingSymlinks(claudeSkills)
+				if err != nil {
+					warn("Failed to resolve symlinks in %s: %s", claudeSkills, err)
+				} else {
+					mountSrc = staged
+					cleanupPaths = append(cleanupPaths, staged)
+				}
+			}
+			args = append(args, "-v", mountSrc+":/host-agent-instructions/claude/skills:ro")
+		}
 		// Gemini: ~/.gemini/GEMINI.md
 		geminiMd := filepath.Join(home, ".gemini", "GEMINI.md")
 		if _, err := os.Stat(geminiMd); err == nil {
@@ -1249,6 +1268,21 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 			} else {
 				args = append(args, "-v", codexMd+":/host-agent-instructions/codex/AGENTS.md:ro")
 			}
+		}
+		// Codex: ~/.codex/skills/ directory
+		codexSkills := filepath.Join(home, ".codex", "skills")
+		if info, err := os.Stat(codexSkills); err == nil && info.IsDir() {
+			mountSrc := codexSkills
+			if dirContainsSymlinks(codexSkills) {
+				staged, err := stageDirResolvingSymlinks(codexSkills)
+				if err != nil {
+					warn("Failed to resolve symlinks in %s: %s", codexSkills, err)
+				} else {
+					mountSrc = staged
+					cleanupPaths = append(cleanupPaths, staged)
+				}
+			}
+			args = append(args, "-v", mountSrc+":/host-agent-instructions/codex/skills:ro")
 		}
 		// Copilot: ~/.copilot/agents/ directory (this is already a directory, works with Apple container)
 		copilotAgents := filepath.Join(home, ".copilot", "agents")
@@ -1343,6 +1377,14 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 			args = append(args, "--network", cfg.Network)
 		}
 	}
+
+	contextDir, err := prepareContextManifest(cfg, absProject, command, interactive, autoPassthroughEnvKeys, ghTokenForwarded)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanupPaths = append(cleanupPaths, contextDir)
+	args = append(args, "-v", contextDir+":/run/yolobox:ro")
+	args = append(args, "-e", "YOLOBOX_CONTEXT_FILE="+yoloboxContextFile)
 
 	if len(cfg.RuntimeArgs) > 0 {
 		args = append(args, cfg.RuntimeArgs...)
