@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -457,6 +458,94 @@ func TestBuildRunArgsContextManifestContents(t *testing.T) {
 	if manifest.Config.Customize.Dockerfile != ".yolobox.Dockerfile" {
 		t.Fatalf("unexpected customize dockerfile: %s", manifest.Config.Customize.Dockerfile)
 	}
+}
+
+func TestDescribeYoloboxContextReportsManifestProjectAccess(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+
+	projectDir := t.TempDir()
+	contextDir := t.TempDir()
+	manifest := buildContextManifest(Config{Image: "test-image"}, projectDir, []string{"codex"}, false, nil, false)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("failed to encode manifest: %v", err)
+	}
+	contextPath := filepath.Join(contextDir, "context.json")
+	if err := os.WriteFile(contextPath, data, 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	cmd := exec.Command("bash", yoloboxSkillContextScriptPath(t))
+	cmd.Dir = projectDir
+	cmd.Env = append(os.Environ(), "YOLOBOX_CONTEXT_FILE="+contextPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("context script failed: %v\n%s", err, out)
+	}
+
+	output := string(out)
+	for _, want := range []string{
+		"Source: manifest",
+		"Readonly project: false",
+		"Project readable: true",
+		"Project writable: true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestDescribeYoloboxContextFallbackUsesProjectAccessBeforeOutputPath(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	projectDir := t.TempDir()
+	outputDir := t.TempDir()
+
+	cmd := exec.Command("bash", yoloboxSkillContextScriptPath(t))
+	cmd.Dir = projectDir
+	cmd.Env = append(os.Environ(),
+		"YOLOBOX=1",
+		"YOLOBOX_CONTEXT_FILE="+filepath.Join(t.TempDir(), "missing.json"),
+		"YOLOBOX_PROJECT_PATH="+projectDir,
+		"YOLOBOX_OUTPUT_PATH="+outputDir,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("context script failed: %v\n%s", err, out)
+	}
+
+	output := string(out)
+	for _, want := range []string{
+		"Source: inferred (manifest unavailable)",
+		"Readonly project: false",
+		"Project readable: true",
+		"Project writable: true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "Output: "+outputDir) {
+		t.Fatalf("did not expect fallback to report output path for writable project:\n%s", output)
+	}
+}
+
+func yoloboxSkillContextScriptPath(t *testing.T) string {
+	t.Helper()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to locate test file")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "skills", "yolobox", "scripts", "describe-yolobox-context.sh")
 }
 
 func TestBuildRunArgsContextManifestAppleRuntime(t *testing.T) {

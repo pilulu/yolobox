@@ -2,6 +2,37 @@
 set -euo pipefail
 
 context_file="${YOLOBOX_CONTEXT_FILE:-/run/yolobox/context.json}"
+output_dir="${YOLOBOX_OUTPUT_PATH:-/output}"
+
+path_access_state() {
+    local mode="$1"
+    local path="$2"
+
+    if [[ -z "$path" || ! -e "$path" ]]; then
+        printf 'unknown'
+        return
+    fi
+
+    case "$mode" in
+        readable)
+            if [[ -r "$path" ]]; then
+                printf 'true'
+            else
+                printf 'false'
+            fi
+            ;;
+        writable)
+            if [[ -w "$path" ]]; then
+                printf 'true'
+            else
+                printf 'false'
+            fi
+            ;;
+        *)
+            printf 'unknown'
+            ;;
+    esac
+}
 
 usage() {
     cat <<'EOF'
@@ -45,11 +76,20 @@ if [[ "${1:-}" == "--json" ]]; then
 fi
 
 if [[ -f "$context_file" ]] && command -v jq >/dev/null 2>&1; then
-    jq -r '
+    project_path="$(jq -r '.paths.project // empty' "$context_file" 2>/dev/null || true)"
+    project_readable="$(path_access_state readable "$project_path")"
+    project_writable="$(path_access_state writable "$project_path")"
+
+    jq -r \
+        --arg project_readable "$project_readable" \
+        --arg project_writable "$project_writable" \
+        '
         [
             "Inside yolobox: yes",
             "Source: manifest",
             "Project: " + .paths.project,
+            "Project readable: " + $project_readable,
+            "Project writable: " + $project_writable,
             "Workdir: " + .launch.working_dir,
             "Home: " + .paths.home,
             (if .paths.output != null and .paths.output != "" then "Output: " + .paths.output else empty end),
@@ -81,14 +121,18 @@ fi
 project="${YOLOBOX_PROJECT_PATH:-$(pwd)}"
 workdir="$(pwd)"
 home_dir="${HOME:-/home/yolo}"
-readonly_project="false"
+project_readable="$(path_access_state readable "$project")"
+project_writable="$(path_access_state writable "$project")"
+readonly_project="unknown"
 output_path=""
 docker_socket="false"
 ssh_agent="false"
 
-if [[ -d /output ]]; then
+if [[ "$project_writable" == "true" ]]; then
+    readonly_project="false"
+elif [[ -d "$output_dir" ]]; then
     readonly_project="true"
-    output_path="/output"
+    output_path="$output_dir"
 fi
 if [[ -S /var/run/docker.sock ]]; then
     docker_socket="true"
@@ -100,6 +144,8 @@ fi
 printf 'Inside yolobox: %s\n' "$inside"
 printf 'Source: inferred (manifest unavailable)\n'
 printf 'Project: %s\n' "$project"
+printf 'Project readable: %s\n' "$project_readable"
+printf 'Project writable: %s\n' "$project_writable"
 printf 'Workdir: %s\n' "$workdir"
 printf 'Home: %s\n' "$home_dir"
 if [[ -n "$output_path" ]]; then
