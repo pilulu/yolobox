@@ -491,8 +491,8 @@ func TestDescribeYoloboxContextReportsManifestProjectAccess(t *testing.T) {
 	output := string(out)
 	for _, want := range []string{
 		"Source: manifest",
-		"Readonly project: false",
-		"Project writable: true",
+		"Readonly project mode: false",
+		"Project writable now: true",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected %q in output:\n%s", want, output)
@@ -524,8 +524,8 @@ func TestDescribeYoloboxContextFallbackUsesProjectAccessBeforeOutputPath(t *test
 	output := string(out)
 	for _, want := range []string{
 		"Source: inferred (manifest unavailable)",
-		"Readonly project: false",
-		"Project writable: true",
+		"Readonly project mode: false",
+		"Project writable now: true",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected %q in output:\n%s", want, output)

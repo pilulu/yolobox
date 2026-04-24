@@ -86,13 +86,13 @@ if [[ -f "$context_file" ]] && command -v jq >/dev/null 2>&1; then
             "Inside yolobox: yes",
             "Source: manifest",
             "Project: " + .paths.project,
-            "Project writable: " + $project_writable,
+            "Project writable now: " + $project_writable,
             "Workdir: " + .launch.working_dir,
             "Home: " + .paths.home,
             (if .paths.output != null and .paths.output != "" then "Output: " + .paths.output else empty end),
             "Runtime: configured=" + .runtime.configured + " selected=" + .runtime.selected,
             "Interactive: " + (.launch.interactive | tostring),
-            "Readonly project: " + (.config.readonly_project | tostring),
+            "Readonly project mode: " + (.config.readonly_project | tostring),
             "Scratch: " + (.config.scratch | tostring),
             "No network: " + (.config.no_network | tostring),
             (if .config.network != "" then "Network: " + .config.network else empty end),
@@ -140,12 +140,12 @@ fi
 printf 'Inside yolobox: %s\n' "$inside"
 printf 'Source: inferred (manifest unavailable)\n'
 printf 'Project: %s\n' "$project"
-printf 'Project writable: %s\n' "$project_writable"
+printf 'Project writable now: %s\n' "$project_writable"
 printf 'Workdir: %s\n' "$workdir"
 printf 'Home: %s\n' "$home_dir"
 if [[ -n "$output_path" ]]; then
     printf 'Output: %s\n' "$output_path"
 fi
-printf 'Readonly project: %s\n' "$readonly_project"
+printf 'Readonly project mode: %s\n' "$readonly_project"
 printf 'Docker socket: %s\n' "$docker_socket"
 printf 'SSH agent: %s\n' "$ssh_agent"

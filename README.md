@@ -273,7 +273,7 @@ This gives agents and scripts a stable way to confirm they are inside yolobox an
 
 The repo's [`skills/`](skills) directory is also the canonical Agent Skills source for yolobox:
 
-- [`skills/yolobox`](skills/yolobox) is the inside-the-box skill. It orients the agent to the trusted yolobox sandbox it is running in, then reads the manifest and summarizes the current constraints and freedoms. yolobox currently installs this built-in for Claude and Codex sessions inside the container.
+- [`skills/yolobox`](skills/yolobox) is the inside-the-box skill. It orients the agent to the trusted yolobox sandbox it is running in, then reads the manifest and summarizes the current constraints and freedoms. Its `Readonly project mode` line reports the launch mode; its `Project writable now` line is a live filesystem check. yolobox currently installs this built-in for Claude and Codex sessions inside the container.
 - [`skills/yolobox-orchestrator`](skills/yolobox-orchestrator) is the host-side skill for agents that need to launch or control yolobox sessions from outside the container.
 
 For Claude and Codex, yolobox also injects a managed instruction block into `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` so the agent knows to use the `yolobox` skill when sandbox assumptions matter.
