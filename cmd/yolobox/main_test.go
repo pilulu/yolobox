@@ -492,7 +492,6 @@ func TestDescribeYoloboxContextReportsManifestProjectAccess(t *testing.T) {
 	for _, want := range []string{
 		"Source: manifest",
 		"Readonly project: false",
-		"Project readable: true",
 		"Project writable: true",
 	} {
 		if !strings.Contains(output, want) {
@@ -526,7 +525,6 @@ func TestDescribeYoloboxContextFallbackUsesProjectAccessBeforeOutputPath(t *test
 	for _, want := range []string{
 		"Source: inferred (manifest unavailable)",
 		"Readonly project: false",
-		"Project readable: true",
 		"Project writable: true",
 	} {
 		if !strings.Contains(output, want) {

@@ -77,18 +77,15 @@ fi
 
 if [[ -f "$context_file" ]] && command -v jq >/dev/null 2>&1; then
     project_path="$(jq -r '.paths.project // empty' "$context_file" 2>/dev/null || true)"
-    project_readable="$(path_access_state readable "$project_path")"
     project_writable="$(path_access_state writable "$project_path")"
 
     jq -r \
-        --arg project_readable "$project_readable" \
         --arg project_writable "$project_writable" \
         '
         [
             "Inside yolobox: yes",
             "Source: manifest",
             "Project: " + .paths.project,
-            "Project readable: " + $project_readable,
             "Project writable: " + $project_writable,
             "Workdir: " + .launch.working_dir,
             "Home: " + .paths.home,
@@ -121,7 +118,6 @@ fi
 project="${YOLOBOX_PROJECT_PATH:-$(pwd)}"
 workdir="$(pwd)"
 home_dir="${HOME:-/home/yolo}"
-project_readable="$(path_access_state readable "$project")"
 project_writable="$(path_access_state writable "$project")"
 readonly_project="unknown"
 output_path=""
@@ -144,7 +140,6 @@ fi
 printf 'Inside yolobox: %s\n' "$inside"
 printf 'Source: inferred (manifest unavailable)\n'
 printf 'Project: %s\n' "$project"
-printf 'Project readable: %s\n' "$project_readable"
 printf 'Project writable: %s\n' "$project_writable"
 printf 'Workdir: %s\n' "$workdir"
 printf 'Home: %s\n' "$home_dir"
