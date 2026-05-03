@@ -179,12 +179,60 @@ RUN cp /opt/yolobox/wrapper-template /opt/yolobox/bin/mistral \
     && echo 'exec "$REAL_BIN" "$@"' >> /opt/yolobox/bin/mistral \
     && chmod +x /opt/yolobox/bin/mistral
 
+# Built-in agent skills live outside /home/yolo so named volumes cannot hide them.
+COPY skills /opt/yolobox/skills
+COPY agent-instructions /opt/yolobox/agent-instructions
 
 # Configure npm to use a user-writable prefix so yolo can `npm install -g` without sudo
 ENV NPM_CONFIG_PREFIX=/home/yolo/.npm-global
 
 # Add wrapper dir, npm-global bin, and ~/.local/bin to PATH (wrappers take priority)
 ENV PATH="/opt/yolobox/bin:/home/yolo/.npm-global/bin:/home/yolo/.local/bin:$PATH"
+
+# Managed-block helper: merges built-in agent guidance into user instruction files
+RUN printf '%s\n' \
+    '#!/usr/bin/env python3' \
+    'import pathlib' \
+    'import sys' \
+    '' \
+    'if len(sys.argv) != 5:' \
+    '    raise SystemExit("usage: yolobox-upsert-block <target> <source> <start> <end>")' \
+    '' \
+    'target = pathlib.Path(sys.argv[1])' \
+    'source = pathlib.Path(sys.argv[2])' \
+    'start_marker = sys.argv[3]' \
+    'end_marker = sys.argv[4]' \
+    '' \
+    'target.parent.mkdir(parents=True, exist_ok=True)' \
+    '' \
+    'existing_lines = []' \
+    'if target.exists():' \
+    '    skip = False' \
+    '    for line in target.read_text().splitlines():' \
+    '        if line == start_marker:' \
+    '            skip = True' \
+    '            continue' \
+    '        if line == end_marker:' \
+    '            skip = False' \
+    '            continue' \
+    '        if not skip:' \
+    '            existing_lines.append(line)' \
+    '' \
+    'while existing_lines and existing_lines[-1] == "":' \
+    '    existing_lines.pop()' \
+    '' \
+    'payload_lines = source.read_text().rstrip("\n").splitlines()' \
+    'output_lines = []' \
+    'if existing_lines:' \
+    '    output_lines.extend(existing_lines)' \
+    '    output_lines.append("")' \
+    'output_lines.append(start_marker)' \
+    'output_lines.extend(payload_lines)' \
+    'output_lines.append(end_marker)' \
+    '' \
+    'target.write_text("\n".join(output_lines) + "\n")' \
+    > /usr/local/bin/yolobox-upsert-block && \
+    chmod +x /usr/local/bin/yolobox-upsert-block
 
 # UID-fix helper: runs as root to change yolo UID/GID and exec as the new user.
 # Called by the entrypoint when the host project dir owner differs from yolo's UID.
@@ -201,7 +249,7 @@ RUN printf '%s\n' \
     chmod +x /usr/local/bin/yolobox-uid-fix.sh
 
 # Create entrypoint script
-RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instructions /host-files && \
+RUN mkdir -p /host-claude /host-codex /host-gemini /host-vibe /host-git /host-agent-instructions /host-files && \
     printf '%s\n' \
     '#!/bin/bash' \
     '' \
@@ -216,6 +264,15 @@ RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instruct
     '# Apple container workaround: files are in /host-files/ instead of separate mounts' \
     '# Check YOLOBOX_HOST_FILES env var for the mount location' \
     'HF="${YOLOBOX_HOST_FILES:-}"' \
+    '' \
+    'inject_agent_guidance() {' \
+    '    local target="$1"' \
+    '    local source_file="$2"' \
+    '    local start_marker="$3"' \
+    '    local end_marker="$4"' \
+    '    /usr/local/bin/yolobox-upsert-block "$target" "$source_file" "$start_marker" "$end_marker"' \
+    '    sudo chown yolo:yolo "$target"' \
+    '}' \
     '' \
     '# Copy Claude config from host staging area if present' \
     'if [ -d /host-claude/.claude ] || [ -f /host-claude/.claude.json ] || [ -f "$HF/claude/.claude.json" ]; then' \
@@ -253,12 +310,20 @@ RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instruct
     '    sudo chown -R yolo:yolo /home/yolo/.gemini' \
     'fi' \
     '' \
+
     '# Copy Vibe config from host staging area if present' \
     'if [ -d /host-vibe/.vibe ]; then' \
     '    echo -e "\033[33m→ Copying host Vibe config to container\033[0m" >&2' \
     '    sudo rm -rf /home/yolo/.vibe' \
     '    sudo cp -a /host-vibe/.vibe /home/yolo/.vibe' \
     '    sudo chown -R yolo:yolo /home/yolo/.vibe' \
+    'fi' \
+    '# Copy Codex config from host staging area if present' \
+    'if [ -d /host-codex/.codex ]; then' \
+    '    echo -e "\033[33m→ Copying host Codex config to container\033[0m" >&2' \
+    '    sudo rm -rf /home/yolo/.codex' \
+    '    sudo cp -a /host-codex/.codex /home/yolo/.codex' \
+    '    sudo chown -R yolo:yolo /home/yolo/.codex' \
     'fi' \
     '' \
     '# Copy git config from host staging area if present' \
@@ -290,6 +355,16 @@ RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instruct
     '    sudo chown yolo:yolo /home/yolo/.claude/CLAUDE.md' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
+    '# Claude: skills/ directory' \
+    'CLAUDE_SKILLS_DIR="/host-agent-instructions/claude/skills"' \
+    '[ ! -d "$CLAUDE_SKILLS_DIR" ] && [ -d "$HF/agent-instructions/claude/skills" ] && CLAUDE_SKILLS_DIR="$HF/agent-instructions/claude/skills"' \
+    'if [ -d "$CLAUDE_SKILLS_DIR" ]; then' \
+    '    mkdir -p /home/yolo/.claude' \
+    '    sudo rm -rf /home/yolo/.claude/skills' \
+    '    sudo cp -a "$CLAUDE_SKILLS_DIR" /home/yolo/.claude/skills' \
+    '    sudo chown -R yolo:yolo /home/yolo/.claude' \
+    '    COPIED_AGENT_INSTRUCTIONS=1' \
+    'fi' \
     '# Gemini: GEMINI.md' \
     'GEMINI_MD="/host-agent-instructions/gemini/GEMINI.md"' \
     '[ ! -f "$GEMINI_MD" ] && [ -f "$HF/agent-instructions/gemini/GEMINI.md" ] && GEMINI_MD="$HF/agent-instructions/gemini/GEMINI.md"' \
@@ -308,6 +383,16 @@ RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instruct
     '    sudo chown -R yolo:yolo /home/yolo/.codex' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
+    '# Codex: skills/ directory' \
+    'CODEX_SKILLS_DIR="/host-agent-instructions/codex/skills"' \
+    '[ ! -d "$CODEX_SKILLS_DIR" ] && [ -d "$HF/agent-instructions/codex/skills" ] && CODEX_SKILLS_DIR="$HF/agent-instructions/codex/skills"' \
+    'if [ -d "$CODEX_SKILLS_DIR" ]; then' \
+    '    mkdir -p /home/yolo/.codex' \
+    '    sudo rm -rf /home/yolo/.codex/skills' \
+    '    sudo cp -a "$CODEX_SKILLS_DIR" /home/yolo/.codex/skills' \
+    '    sudo chown -R yolo:yolo /home/yolo/.codex' \
+    '    COPIED_AGENT_INSTRUCTIONS=1' \
+    'fi' \
     '# Copilot: agents/ directory' \
     'if [ -d /host-agent-instructions/copilot/agents ]; then' \
     '    mkdir -p /home/yolo/.copilot' \
@@ -317,8 +402,23 @@ RUN mkdir -p /host-claude /host-gemini /host-vibe /host-git /host-agent-instruct
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
     'if [ "$COPIED_AGENT_INSTRUCTIONS" = "1" ]; then' \
-    '    echo -e "\033[33m→ Copying global agent instructions to container\033[0m" >&2' \
+    '    echo -e "\033[33m→ Copying global agent instructions and skills to container\033[0m" >&2' \
     'fi' \
+    '' \
+    '# Install built-in yolobox skill from the image (named volume may shadow /home/yolo)' \
+    'if [ -d /opt/yolobox/skills/yolobox ]; then' \
+    '    mkdir -p /home/yolo/.codex/skills /home/yolo/.claude/skills' \
+    '    sudo rm -rf /home/yolo/.codex/skills/yolobox-context' \
+    '    sudo rm -rf /home/yolo/.codex/skills/yolobox' \
+    '    sudo cp -a /opt/yolobox/skills/yolobox /home/yolo/.codex/skills/yolobox' \
+    '    sudo rm -rf /home/yolo/.claude/skills/yolobox' \
+    '    sudo cp -a /opt/yolobox/skills/yolobox /home/yolo/.claude/skills/yolobox' \
+    '    sudo chown -R yolo:yolo /home/yolo/.codex /home/yolo/.claude' \
+    'fi' \
+    '' \
+    '# Inject built-in agent guidance so Claude and Codex use the yolobox skill when it matters' \
+    'inject_agent_guidance /home/yolo/.claude/CLAUDE.md /opt/yolobox/agent-instructions/claude/yolobox.md "<!-- BEGIN YOLOBOX MANAGED BLOCK -->" "<!-- END YOLOBOX MANAGED BLOCK -->"' \
+    'inject_agent_guidance /home/yolo/.codex/AGENTS.md /opt/yolobox/agent-instructions/codex/yolobox.md "# BEGIN YOLOBOX MANAGED BLOCK" "# END YOLOBOX MANAGED BLOCK"' \
     '' \
     '# Handle Docker socket access without mutating host socket permissions' \
     'if [ -S /var/run/docker.sock ]; then' \

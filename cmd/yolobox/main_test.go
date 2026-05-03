@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -26,10 +28,11 @@ func TestMergeConfig(t *testing.T) {
 		Image:   "old-image",
 	}
 	src := Config{
-		Image:     "new-image",
-		SSHAgent:  true,
-		NoNetwork: true,
-		Scratch:   true,
+		Image:       "new-image",
+		SSHAgent:    true,
+		NoNetwork:   true,
+		Scratch:     true,
+		CodexConfig: true,
 	}
 
 	mergeConfig(&dst, src)
@@ -48,6 +51,9 @@ func TestMergeConfig(t *testing.T) {
 	}
 	if !dst.Scratch {
 		t.Error("expected Scratch to be true")
+	}
+	if !dst.CodexConfig {
+		t.Error("expected CodexConfig to be true")
 	}
 }
 
@@ -123,6 +129,30 @@ func TestLoadSetupDefaultsIgnoresProjectConfig(t *testing.T) {
 	}
 	if len(cfg.Customize.Packages) != 0 {
 		t.Fatalf("did not expect project customize packages in setup defaults, got %v", cfg.Customize.Packages)
+	}
+}
+
+func TestLoadConfigCodexConfig(t *testing.T) {
+	projectDir := t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("HOME", t.TempDir())
+
+	globalConfigDir := filepath.Join(configHome, "yolobox")
+	if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+		t.Fatalf("failed to create global config dir: %v", err)
+	}
+	globalConfigPath := filepath.Join(globalConfigDir, "config.toml")
+	if err := os.WriteFile(globalConfigPath, []byte("codex_config = true\n"), 0644); err != nil {
+		t.Fatalf("failed to write global config: %v", err)
+	}
+
+	cfg, err := loadConfig(projectDir)
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+	if !cfg.CodexConfig {
+		t.Fatal("expected codex_config to load from config file")
 	}
 }
 
@@ -246,7 +276,7 @@ func TestBuildRunArgs(t *testing.T) {
 		Mounts: []string{},
 	}
 
-	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, true)
+	args, cleanupPaths, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,6 +296,9 @@ func TestBuildRunArgs(t *testing.T) {
 	if !strings.Contains(argsStr, "YOLOBOX_PROJECT_PATH=/test/project") {
 		t.Error("expected YOLOBOX_PROJECT_PATH env var")
 	}
+	if !strings.Contains(argsStr, "YOLOBOX_CONTEXT_FILE=/run/yolobox/context.json") {
+		t.Error("expected YOLOBOX_CONTEXT_FILE env var")
+	}
 	if !strings.Contains(argsStr, "FOO=bar") {
 		t.Error("expected FOO=bar env var")
 	}
@@ -280,10 +313,268 @@ func TestBuildRunArgs(t *testing.T) {
 	if !strings.Contains(argsStr, "yolobox-cache:/var/cache") {
 		t.Error("expected yolobox-cache volume")
 	}
+	if len(cleanupPaths) == 0 || !strings.Contains(argsStr, cleanupPaths[len(cleanupPaths)-1]+":/run/yolobox:ro") {
+		t.Error("expected context manifest mount")
+	}
 
 	// Verify no --network flag when using default network
 	if strings.Contains(argsStr, "--network") {
 		t.Error("expected no --network flag for default network behavior")
+	}
+}
+
+func TestBuildRunArgsCopyAgentInstructionsIncludesAgentSkills(t *testing.T) {
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	claudeDir := filepath.Join(homeDir, ".claude")
+	if err := os.MkdirAll(filepath.Join(claudeDir, "skills", "demo-skill"), 0755); err != nil {
+		t.Fatalf("failed to create Claude skills dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("host claude guidance\n"), 0644); err != nil {
+		t.Fatalf("failed to write CLAUDE.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "skills", "demo-skill", "SKILL.md"), []byte("---\nname: demo-skill\ndescription: test\n---\n"), 0644); err != nil {
+		t.Fatalf("failed to write Claude skill: %v", err)
+	}
+	codexDir := filepath.Join(homeDir, ".codex")
+	if err := os.MkdirAll(filepath.Join(codexDir, "skills", "demo-codex-skill"), 0755); err != nil {
+		t.Fatalf("failed to create Codex skills dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "AGENTS.md"), []byte("host codex guidance\n"), 0644); err != nil {
+		t.Fatalf("failed to write AGENTS.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "skills", "demo-codex-skill", "SKILL.md"), []byte("---\nname: demo-codex-skill\ndescription: test\n---\n"), 0644); err != nil {
+		t.Fatalf("failed to write Codex skill: %v", err)
+	}
+
+	cfg := Config{CopyAgentInstructions: true}
+	args, _, err := buildRunArgs(cfg, projectDir, []string{"echo", "hello"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	argsStr := strings.Join(args, " ")
+	if !strings.Contains(argsStr, filepath.Join(claudeDir, "CLAUDE.md")+":/host-agent-instructions/claude/CLAUDE.md:ro") {
+		t.Fatalf("expected CLAUDE.md mount, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(claudeDir, "skills")+":/host-agent-instructions/claude/skills:ro") {
+		t.Fatalf("expected Claude skills mount, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(codexDir, "AGENTS.md")+":/host-agent-instructions/codex/AGENTS.md:ro") {
+		t.Fatalf("expected AGENTS.md mount, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(codexDir, "skills")+":/host-agent-instructions/codex/skills:ro") {
+		t.Fatalf("expected Codex skills mount, got %s", argsStr)
+	}
+}
+
+func TestBuildRunArgsContextManifestContents(t *testing.T) {
+	projectDir := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	cfg := Config{
+		Image:           "test-image",
+		Env:             []string{"FOO=bar", "SUPER_SECRET=do-not-leak", "DEBUG"},
+		ReadonlyProject: true,
+		NoYolo:          true,
+		Network:         "devnet",
+		Customize: CustomizeConfig{
+			Packages:   []string{"jq"},
+			Dockerfile: ".yolobox.Dockerfile",
+		},
+	}
+
+	args, cleanupPaths, err := buildRunArgs(cfg, projectDir, []string{"echo", "hello"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cleanupPaths) == 0 {
+		t.Fatal("expected context manifest cleanup path")
+	}
+
+	argsStr := strings.Join(args, " ")
+	contextDir := cleanupPaths[len(cleanupPaths)-1]
+	if !strings.Contains(argsStr, contextDir+":/run/yolobox:ro") {
+		t.Fatalf("expected context manifest mount, got %s", argsStr)
+	}
+
+	data, err := os.ReadFile(filepath.Join(contextDir, "context.json"))
+	if err != nil {
+		t.Fatalf("failed to read context manifest: %v", err)
+	}
+	if strings.Contains(string(data), "do-not-leak") {
+		t.Fatal("did not expect raw env values in context manifest")
+	}
+
+	var manifest contextManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("failed to decode context manifest: %v", err)
+	}
+
+	if manifest.SchemaVersion != 1 {
+		t.Fatalf("expected schema version 1, got %d", manifest.SchemaVersion)
+	}
+	if !manifest.InsideYolobox {
+		t.Fatal("expected inside_yolobox to be true")
+	}
+	if manifest.Paths.Project != projectDir {
+		t.Fatalf("expected project path %s, got %s", projectDir, manifest.Paths.Project)
+	}
+	if manifest.Paths.Home != "/home/yolo" {
+		t.Fatalf("expected /home/yolo home path, got %s", manifest.Paths.Home)
+	}
+	if manifest.Paths.Output != "/output" {
+		t.Fatalf("expected readonly project output path, got %s", manifest.Paths.Output)
+	}
+	if manifest.Launch.ContextFile != yoloboxContextFile {
+		t.Fatalf("expected context file %s, got %s", yoloboxContextFile, manifest.Launch.ContextFile)
+	}
+	if !reflect.DeepEqual(manifest.Launch.Command, []string{"echo", "hello"}) {
+		t.Fatalf("unexpected launch command: %v", manifest.Launch.Command)
+	}
+	if manifest.Launch.Interactive {
+		t.Fatal("expected non-interactive launch")
+	}
+	if !contains(manifest.Launch.AutoPassthroughEnvKeys, "OPENAI_API_KEY") {
+		t.Fatalf("expected OPENAI_API_KEY in auto passthrough env keys, got %v", manifest.Launch.AutoPassthroughEnvKeys)
+	}
+	if !reflect.DeepEqual(manifest.Config.EnvKeys, []string{"FOO", "SUPER_SECRET", "DEBUG"}) {
+		t.Fatalf("unexpected env keys: %v", manifest.Config.EnvKeys)
+	}
+	if !manifest.Config.ReadonlyProject {
+		t.Fatal("expected readonly_project in manifest config")
+	}
+	if !manifest.Config.NoYolo {
+		t.Fatal("expected no_yolo in manifest config")
+	}
+	if manifest.Config.Network != "devnet" {
+		t.Fatalf("expected network devnet, got %s", manifest.Config.Network)
+	}
+	if !reflect.DeepEqual(manifest.Config.Customize.Packages, []string{"jq"}) {
+		t.Fatalf("unexpected customize packages: %v", manifest.Config.Customize.Packages)
+	}
+	if manifest.Config.Customize.Dockerfile != ".yolobox.Dockerfile" {
+		t.Fatalf("unexpected customize dockerfile: %s", manifest.Config.Customize.Dockerfile)
+	}
+}
+
+func TestDescribeYoloboxContextReportsManifestProjectAccess(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+
+	projectDir := t.TempDir()
+	contextDir := t.TempDir()
+	manifest := buildContextManifest(Config{Image: "test-image"}, projectDir, []string{"codex"}, false, nil, false)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("failed to encode manifest: %v", err)
+	}
+	contextPath := filepath.Join(contextDir, "context.json")
+	if err := os.WriteFile(contextPath, data, 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	cmd := exec.Command("bash", yoloboxSkillContextScriptPath(t))
+	cmd.Dir = projectDir
+	cmd.Env = append(os.Environ(), "YOLOBOX_CONTEXT_FILE="+contextPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("context script failed: %v\n%s", err, out)
+	}
+
+	output := string(out)
+	for _, want := range []string{
+		"Source: manifest",
+		"Readonly project mode: false",
+		"Project writable now: true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestDescribeYoloboxContextFallbackUsesProjectAccessBeforeOutputPath(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	projectDir := t.TempDir()
+	outputDir := t.TempDir()
+
+	cmd := exec.Command("bash", yoloboxSkillContextScriptPath(t))
+	cmd.Dir = projectDir
+	cmd.Env = append(os.Environ(),
+		"YOLOBOX=1",
+		"YOLOBOX_CONTEXT_FILE="+filepath.Join(t.TempDir(), "missing.json"),
+		"YOLOBOX_PROJECT_PATH="+projectDir,
+		"YOLOBOX_OUTPUT_PATH="+outputDir,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("context script failed: %v\n%s", err, out)
+	}
+
+	output := string(out)
+	for _, want := range []string{
+		"Source: inferred (manifest unavailable)",
+		"Readonly project mode: false",
+		"Project writable now: true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "Output: "+outputDir) {
+		t.Fatalf("did not expect fallback to report output path for writable project:\n%s", output)
+	}
+}
+
+func yoloboxSkillContextScriptPath(t *testing.T) string {
+	t.Helper()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to locate test file")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "skills", "yolobox", "scripts", "describe-yolobox-context.sh")
+}
+
+func TestBuildRunArgsContextManifestAppleRuntime(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := t.TempDir()
+	containerPath := filepath.Join(runtimeDir, "container")
+	if err := os.WriteFile(containerPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("failed to write fake container runtime: %v", err)
+	}
+	t.Setenv("PATH", runtimeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := Config{
+		Runtime: "container",
+		Image:   "test-image",
+	}
+
+	args, cleanupPaths, err := buildRunArgs(cfg, projectDir, []string{"echo"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cleanupPaths) == 0 {
+		t.Fatal("expected context manifest cleanup path")
+	}
+
+	argsStr := strings.Join(args, " ")
+	contextDir := cleanupPaths[len(cleanupPaths)-1]
+	if !strings.Contains(argsStr, contextDir+":/run/yolobox:ro") {
+		t.Fatalf("expected context manifest mount for Apple container runtime, got %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "YOLOBOX_CONTEXT_FILE=/run/yolobox/context.json") {
+		t.Fatalf("expected context env var for Apple container runtime, got %s", argsStr)
 	}
 }
 
@@ -412,6 +703,34 @@ func TestBuildRunArgsReadonlyProject(t *testing.T) {
 	}
 	if !strings.Contains(argsStr, "yolobox-output:/output") {
 		t.Error("expected yolobox-output volume for ReadonlyProject")
+	}
+}
+
+func TestBuildRunArgsCodexConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	codexConfigDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexConfigDir, 0755); err != nil {
+		t.Fatalf("failed to create codex config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexConfigDir, "config.toml"), []byte("model = \"gpt-5\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write codex config file: %v", err)
+	}
+
+	cfg := Config{
+		Image:       "test-image",
+		CodexConfig: true,
+	}
+
+	args, _, err := buildRunArgs(cfg, "/test/project", []string{"bash"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	argsStr := strings.Join(args, " ")
+	if !strings.Contains(argsStr, codexConfigDir+":/host-codex/.codex:ro") {
+		t.Fatalf("expected codex config mount, got %s", argsStr)
 	}
 }
 
@@ -1337,6 +1656,12 @@ func TestSplitToolArgs(t *testing.T) {
 			wantTool:    []string{"--resume"},
 		},
 		{
+			name:        "codex config flag stays with yolobox",
+			args:        []string{"--codex-config", "--resume"},
+			wantYolobox: []string{"--codex-config"},
+			wantTool:    []string{"--resume"},
+		},
+		{
 			name:        "multiple yolobox flags then tool args",
 			args:        []string{"--no-network", "--scratch", "--resume", "abc123"},
 			wantYolobox: []string{"--no-network", "--scratch"},
@@ -1423,6 +1748,17 @@ func TestDetectTimezone(t *testing.T) {
 	if tz != "" && !strings.Contains(tz, "/") {
 		t.Errorf("expected IANA timezone with '/' or empty string, got %q", tz)
 	}
+}
+
+func TestParseFlagsCodexConfig(t *testing.T) {
+	cfg, rest, err := parseBaseFlags("run", []string{"--codex-config", "codex", "--version"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.CodexConfig {
+		t.Fatal("expected CodexConfig to be true after parsing --codex-config")
+	}
+	expectSliceEqual(t, rest, []string{"codex", "--version"})
 }
 
 func TestBuildRunArgsTimezone(t *testing.T) {

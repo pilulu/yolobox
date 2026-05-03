@@ -88,18 +88,20 @@ runtime_args = ["--security-opt", "seccomp=unconfined"]
 
 ## Global agent instructions {#global-agent-instructions}
 
-The `--copy-agent-instructions` flag copies your global or user-level instruction files into the container.
+The `--copy-agent-instructions` flag copies your global or user-level instruction files and skills into the container.
 
 Files copied if they exist on your host:
 
 | Tool | Source | Destination |
 |------|--------|-------------|
 | Claude | `~/.claude/CLAUDE.md` | `/home/yolo/.claude/CLAUDE.md` |
+| Claude skills | `~/.claude/skills/` | `/home/yolo/.claude/skills/` |
 | Gemini | `~/.gemini/GEMINI.md` | `/home/yolo/.gemini/GEMINI.md` |
 | Codex | `~/.codex/AGENTS.md` | `/home/yolo/.codex/AGENTS.md` |
+| Codex skills | `~/.codex/skills/` | `/home/yolo/.codex/skills/` |
 | Copilot | `~/.copilot/agents/` | `/home/yolo/.copilot/agents/` |
 
-This copies instruction files, not full configs, credentials, settings, or history.
+This copies instruction files and skills, not full configs, credentials, settings, or history. For full tool configs, use `--claude-config`, `--codex-config`, or `--gemini-config`.
 
 ## Auto-forwarded environment variables
 
@@ -116,8 +118,21 @@ These are automatically passed into the container if they are set on the host:
 On macOS, `gh` stores tokens in Keychain, not environment variables. Use `--gh-token` or `gh_token = true` if you want yolobox to extract and forward the GitHub CLI token.
 :::
 
+## Runtime context manifest
+
+Every yolobox session mounts a runtime manifest at `/run/yolobox/context.json` and sets `YOLOBOX_CONTEXT_FILE` to that path.
+
+The manifest is intended for agents and scripts running inside the container. It exposes the resolved runtime and launch context in JSON, including an `inside_yolobox` confirmation, the effective config, container paths, launch command, and the keys of forwarded environment variables without copying their values into the manifest.
+
+The canonical skill packages live under [`skills/`](../skills):
+
+- [`skills/yolobox`](../skills/yolobox) is the inside-the-box skill that orients the agent to the trusted yolobox sandbox it is running in, then uses this manifest to explain the current sandbox accurately. Its `Readonly project mode` line reports the launch mode; its `Project writable now` line is a live filesystem check. yolobox currently installs it for Claude and Codex sessions inside the container.
+- [`skills/yolobox-orchestrator`](../skills/yolobox-orchestrator) is the host-side skill for agents that need to launch or control yolobox itself.
+
+yolobox also injects a managed guidance block into `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` so those agents know to use the `yolobox` skill when current sandbox assumptions matter.
+
 ## Config sync warning
 
 ::: warning
-Setting `claude_config = true` or `gemini_config = true` in config copies your host config on every container start. That can overwrite changes made inside the container, including auth and history. Prefer `--claude-config` or `--gemini-config` for one-time syncs.
+Setting `claude_config = true`, `codex_config = true`, or `gemini_config = true` in config copies your host config on every container start. That can overwrite changes made inside the container, including auth and history. Prefer `--claude-config`, `--codex-config`, or `--gemini-config` for one-time syncs.
 :::
